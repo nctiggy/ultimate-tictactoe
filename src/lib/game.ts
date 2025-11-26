@@ -140,6 +140,7 @@ export function playMove(
   updatedBoard.cells[cellIndex] = state.currentPlayer;
 
   let pendingRpsBoard: number | null = state.pendingRpsBoard;
+  let pendingFinalRps: boolean = state.pendingFinalRps;
   let nextBoard: number | null = cellIndex;
   let macroWinner = state.macroWinner;
 
@@ -468,7 +469,7 @@ export function submitFinalRpsChoice(
   const picks = { ...state.finalRps.picks, [player]: choice };
   let finalRps: FinalRpsState = { ...state.finalRps, picks };
   let macroWinner = state.macroWinner;
-  let pendingFinalRps = state.pendingFinalRps;
+  let pendingFinalRps: boolean = !!state.pendingFinalRps;
   let currentPlayer: Player = state.currentPlayer;
   let finalWinner: Player | undefined;
 
