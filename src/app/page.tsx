@@ -22,6 +22,7 @@ import { supabase } from "../lib/supabaseClient";
 
 const COOKIE_KEY = "utt_state_v1";
 const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
+const LOBBY_STALE_MS = 10 * 60 * 1000; // 10 minutes
 
 type RemoteStatus = "idle" | "connecting" | "connected";
 type RemoteState = {
@@ -164,7 +165,7 @@ export default function Home() {
             if (entry.code) {
               codes.push({
                 code: entry.code,
-                role: entry.role as RemoteRole,
+                role: entry.role ?? "spectator",
                 timestamp: entry.timestamp ?? Date.now()
               });
             }
@@ -172,6 +173,7 @@ export default function Home() {
         });
         setLobbyCodes(
           codes
+            .filter((c) => Date.now() - c.timestamp < LOBBY_STALE_MS)
             .sort((a, b) => b.timestamp - a.timestamp)
             .filter(
               (item, idx, self) =>
@@ -214,6 +216,30 @@ export default function Home() {
         })
         .catch(() => {});
     }
+  }, [remote.status, remote.code, remote.role]);
+
+  useEffect(() => {
+    const lobby = lobbyChannelRef.current;
+    if (!lobby) return;
+    const interval = setInterval(() => {
+      if (remote.status === "connected" && remote.code) {
+        lobby
+          .track({
+            code: remote.code,
+            role: remote.role,
+            timestamp: Date.now()
+          })
+          .catch(() => {});
+      } else {
+        lobby
+          .track({
+            lobby: true,
+            timestamp: Date.now()
+          })
+          .catch(() => {});
+      }
+    }, 25_000);
+    return () => clearInterval(interval);
   }, [remote.status, remote.code, remote.role]);
 
   useEffect(() => {
@@ -261,6 +287,7 @@ export default function Home() {
       lastEvent: undefined,
       spectator: false
     }));
+    setShowSetup(true);
   };
 
   const handleRemotePayload = (payload: RemotePayload) => {
@@ -500,12 +527,33 @@ export default function Home() {
               <p className="text-sm text-slate-400">Ultimate Tic Tac Toe</p>
               <h1 className="text-3xl font-bold">Nine boards, one champion</h1>
             </div>
-            <button
-              onClick={resetGame}
-              className="px-4 py-2 rounded-xl bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30 border border-emerald-400/30 transition"
-            >
-              New Match
-            </button>
+            <div className="flex items-center gap-2">
+              {inSession && remote.code && (
+                <div className="px-3 py-1 rounded-full border border-indigo-400/40 bg-indigo-500/10 text-indigo-100 text-xs">
+                  Code: {remote.code} · Role: {remote.role}
+                </div>
+              )}
+              <button
+                onClick={() => {
+                  if (inSession) {
+                    const ok = window.confirm(
+                      "Leave current match and reset locally?"
+                    );
+                    if (!ok) return;
+                    disconnectRemote();
+                  }
+                  resetGame();
+                }}
+                className={clsx(
+                  "px-4 py-2 rounded-xl border transition",
+                  inSession
+                    ? "bg-amber-500/15 text-amber-100 border-amber-400/40 hover:bg-amber-500/25"
+                    : "bg-emerald-500/20 text-emerald-200 border-emerald-400/30 hover:bg-emerald-500/30"
+                )}
+              >
+                {inSession ? "Leave & reset" : "New match"}
+              </button>
+            </div>
           </header>
 
           <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
