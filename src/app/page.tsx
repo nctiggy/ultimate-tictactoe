@@ -150,8 +150,16 @@ export default function Home() {
   const [matchNameInput, setMatchNameInput] = useState("");
   const [showSetup, setShowSetup] = useState(true);
   const [mode, setMode] = useState<"none" | "local" | "online">("none");
+  const [setupStage, setSetupStage] = useState<"choose" | "local" | "online">(
+    "choose"
+  );
   const [myName, setMyName] = useState("Player");
-  const [pendingChoice, setPendingChoice] = useState<"local" | "online">("local");
+  const [localNames, setLocalNames] = useState({ X: "Player X", O: "Player O" });
+  const [localBots, setLocalBots] = useState<{ X: BotLevel; O: BotLevel }>({
+    X: "none",
+    O: "none"
+  });
+  const [pendingRole, setPendingRole] = useState<Player>("X");
   const audio = useAudio();
   const aiTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
@@ -499,7 +507,7 @@ export default function Home() {
   }, [game]);
 
   const handleCellClick = (boardIndex: number, cellIndex: number) => {
-    if (!game || game.macroWinner) return;
+    if (!game || game.macroWinner || showSetup || mode === "none") return;
 
     if (
       remote.status === "connected" &&
@@ -537,7 +545,7 @@ export default function Home() {
   };
 
   const handleRpsChoice = (choice: RpsChoice) => {
-    if (!game) return;
+    if (!game || showSetup || mode === "none") return;
     if (
       remote.status === "connected" &&
       remote.role !== game.currentPlayer &&
@@ -620,23 +628,25 @@ export default function Home() {
   };
 
   const resetGame = () => {
-    const bots = game?.bots ?? { X: "none", O: "none" };
-    const names = game?.names ?? { X: "Player X", O: "Player O" };
     const fresh = createInitialState();
-    fresh.bots = bots;
-    fresh.names = names;
+    fresh.bots = { ...localBots };
+    fresh.names = { ...localNames };
     setGame(fresh);
     setMessage(null);
+    disconnectRemote();
     setMode("none");
     setShowSetup(true);
+    setSetupStage("choose");
   };
 
   const updateName = (player: "X" | "O", value: string) => {
+    setLocalNames((prev) => ({ ...prev, [player]: value || `Player ${player}` }));
     if (!game) return;
     setGame({ ...game, names: { ...game.names, [player]: value } });
   };
 
   const updateBot = (player: "X" | "O", level: BotLevel) => {
+    setLocalBots((prev) => ({ ...prev, [player]: level }));
     if (!game) return;
     setGame({ ...game, bots: { ...game.bots, [player]: level } });
   };
@@ -654,45 +664,234 @@ export default function Home() {
 
   return (
     <main className="min-h-screen px-4 py-8">
-      {mode === "none" && (
+      {showSetup && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-40 p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl">
-            <h2 className="text-xl font-bold text-slate-100">Choose a mode</h2>
-            <p className="text-sm text-slate-400">
-              Play locally on this device or join an online match via code.
-            </p>
-            <div className="grid grid-cols-1 gap-3">
-              <button
-                className="rounded-xl border border-emerald-400/40 bg-emerald-500/10 text-emerald-100 px-4 py-3 text-left hover:bg-emerald-500/20"
-                onClick={() => {
-                  setMode("local");
-                  setShowSetup(true);
-                  setRemote((prev) => ({
-                    ...prev,
-                    code: "",
-                    status: "idle",
-                    spectator: false
-                  }));
-                }}
-              >
-                <div className="font-semibold">New Local Game</div>
-                <div className="text-xs text-emerald-200/80">
-                  Hotseat or bots. Leaving destroys the local match.
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-2xl w-full space-y-4 shadow-2xl">
+            <h2 className="text-xl font-bold text-slate-100">New Game</h2>
+            {setupStage === "choose" && (
+              <>
+                <p className="text-sm text-slate-400">
+                  Choose local or online. Settings lock in when you start.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button
+                    className="rounded-xl border border-emerald-400/40 bg-emerald-500/10 text-emerald-100 px-4 py-3 text-left hover:bg-emerald-500/20"
+                    onClick={() => {
+                      disconnectRemote();
+                      setMode("local");
+                      setSetupStage("local");
+                    }}
+                  >
+                    <div className="font-semibold">Local Game</div>
+                    <div className="text-xs text-emerald-200/80">
+                      Hotseat or bots on this device.
+                    </div>
+                  </button>
+                  <button
+                    className="rounded-xl border border-indigo-400/40 bg-indigo-500/10 text-indigo-100 px-4 py-3 text-left hover:bg-indigo-500/20"
+                    onClick={() => {
+                      setMode("online");
+                      setSetupStage("online");
+                    }}
+                  >
+                    <div className="font-semibold">Online Game</div>
+                    <div className="text-xs text-indigo-200/80">
+                      Host or join with a code.
+                    </div>
+                  </button>
                 </div>
-              </button>
-              <button
-                className="rounded-xl border border-indigo-400/40 bg-indigo-500/10 text-indigo-100 px-4 py-3 text-left hover:bg-indigo-500/20"
-                onClick={() => {
-                  setMode("online");
-                  setShowSetup(true);
-                }}
-              >
-                <div className="font-semibold">Join Online</div>
-                <div className="text-xs text-indigo-200/80">
-                  Host or join with a code. Leave/rejoin anytime.
+              </>
+            )}
+            {setupStage === "local" && (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="text-sm text-slate-300 space-y-1">
+                    Name (X)
+                    <input
+                      value={localNames.X}
+                      onChange={(e) => updateName("X", e.target.value)}
+                      className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/40"
+                    />
+                  </label>
+                  <label className="text-sm text-slate-300 space-y-1">
+                    Name (O)
+                    <input
+                      value={localNames.O}
+                      onChange={(e) => updateName("O", e.target.value)}
+                      className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/40"
+                    />
+                  </label>
                 </div>
-              </button>
-            </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <SelectBot
+                    player="X"
+                    botLevel={localBots.X}
+                    onChange={(lvl) => updateBot("X", lvl)}
+                  />
+                  <SelectBot
+                    player="O"
+                    botLevel={localBots.O}
+                    onChange={(lvl) => updateBot("O", lvl)}
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    className="px-4 py-2 rounded-lg border border-emerald-400/40 bg-emerald-500/15 text-emerald-100 hover:bg-emerald-500/25"
+                    onClick={() => {
+                      const fresh = createInitialState();
+                      fresh.names = { ...localNames };
+                      fresh.bots = { ...localBots };
+                      disconnectRemote();
+                      setGame(fresh);
+                      setMode("local");
+                      setShowSetup(false);
+                    }}
+                  >
+                    Start Local Game
+                  </button>
+                  <button
+                    className="px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/60 text-slate-300 hover:border-slate-500/60"
+                    onClick={() => {
+                      setSetupStage("choose");
+                      setMode("none");
+                    }}
+                  >
+                    Back
+                  </button>
+                </div>
+              </div>
+            )}
+            {setupStage === "online" && (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="text-sm text-slate-300 space-y-1">
+                    Your name
+                    <input
+                      value={myName}
+                      onChange={(e) => setMyName(e.target.value)}
+                      className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+                    />
+                  </label>
+                  <label className="text-sm text-slate-300 space-y-1">
+                    Match name
+                    <input
+                      value={matchNameInput}
+                      onChange={(e) => setMatchNameInput(e.target.value)}
+                      className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+                    />
+                  </label>
+                </div>
+                <div className="grid grid-cols-3 gap-3 text-sm text-slate-300">
+                  <label className="space-y-1">
+                    Code
+                    <input
+                      value={remoteCodeInput}
+                      onChange={(e) => setRemoteCodeInput(e.target.value.toUpperCase())}
+                      className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+                      placeholder="ABC1"
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    Pass X
+                    <input
+                      value={passX}
+                      onChange={(e) => setPassX(e.target.value)}
+                      className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    Pass O
+                    <input
+                      value={passO}
+                      onChange={(e) => setPassO(e.target.value)}
+                      className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+                    />
+                  </label>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    onClick={() => {
+                      const fresh = createInitialState();
+                      fresh.names[pendingRole] = myName || `Player ${pendingRole}`;
+                      setGame(fresh);
+                      setMode("online");
+                      setShowSetup(false);
+                      connectRemote(
+                        remoteCodeInput || randomCode(),
+                        "X"
+                      );
+                    }}
+                    className="px-3 py-2 rounded-lg border border-cyan-400/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20"
+                  >
+                    Host as X
+                  </button>
+                  <button
+                    onClick={() => {
+                      const fresh = createInitialState();
+                      fresh.names[pendingRole] = myName || `Player ${pendingRole}`;
+                      setGame(fresh);
+                      setMode("online");
+                      setShowSetup(false);
+                      connectRemote(
+                        remoteCodeInput || randomCode(),
+                        "O"
+                      );
+                    }}
+                    className="px-3 py-2 rounded-lg border border-cyan-400/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20"
+                  >
+                    Host as O
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (!remoteCodeInput) return;
+                      const fresh = createInitialState();
+                      fresh.names[pendingRole] = myName || `Player ${pendingRole}`;
+                      setGame(fresh);
+                      setMode("online");
+                      setShowSetup(false);
+                      connectRemote(remoteCodeInput, pendingRole);
+                    }}
+                    className="px-3 py-2 rounded-lg border border-indigo-400/40 bg-indigo-500/10 text-indigo-100 hover:bg-indigo-500/20"
+                  >
+                    Join as {pendingRole}
+                  </button>
+                </div>
+                <div className="flex gap-2 text-xs text-slate-400">
+                  <button
+                    className="px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/60 text-slate-300 hover:border-slate-500/60"
+                    onClick={() => setPendingRole("X")}
+                  >
+                    I am X
+                  </button>
+                  <button
+                    className="px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/60 text-slate-300 hover:border-slate-500/60"
+                    onClick={() => setPendingRole("O")}
+                  >
+                    I am O
+                  </button>
+                  <button
+                    className="px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/60 text-slate-300 hover:border-slate-500/60"
+                    onClick={() => setPendingRole("X")}
+                  >
+                    Spectate (start later)
+                  </button>
+                </div>
+                <div className="text-xs text-slate-500">
+                  Use the same code and pass to rejoin. Moves from the wrong pass are ignored.
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    className="px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/60 text-slate-300 hover:border-slate-500/60"
+                    onClick={() => {
+                      setSetupStage("choose");
+                      setMode("none");
+                    }}
+                  >
+                    Back
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -964,6 +1163,44 @@ function PlayerCard({
           <button
             key={level}
             onClick={() => onBotChange(player, level)}
+            className={clsx(
+              "px-3 py-2 rounded-lg border flex-1 transition",
+              botLevel === level
+                ? "border-emerald-400/50 bg-emerald-500/15 text-emerald-100"
+                : "border-slate-700/70 bg-slate-800/60 text-slate-300 hover:border-slate-500/60"
+            )}
+          >
+            {level === "none"
+              ? "Human"
+              : level === "easy"
+              ? "AI: Easy"
+              : level === "smart"
+              ? "AI: Smart"
+              : "AI: Hard"}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SelectBot({
+  player,
+  botLevel,
+  onChange
+}: {
+  player: "X" | "O";
+  botLevel: BotLevel;
+  onChange: (level: BotLevel) => void;
+}) {
+  return (
+    <div className="space-y-1 text-sm text-slate-300">
+      <div className="font-semibold">Bot for {player}</div>
+      <div className="flex gap-2 text-xs">
+        {(["none", "easy", "smart", "hard"] as BotLevel[]).map((level) => (
+          <button
+            key={level}
+            onClick={() => onChange(level)}
             className={clsx(
               "px-3 py-2 rounded-lg border flex-1 transition",
               botLevel === level
