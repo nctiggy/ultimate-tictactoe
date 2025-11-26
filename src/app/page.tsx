@@ -176,6 +176,12 @@ export default function Home() {
     X: "none",
     O: "none"
   });
+  const [claimModal, setClaimModal] = useState<{
+    open: boolean;
+    role: Player | null;
+    pass: string;
+    error?: string;
+  }>({ open: false, role: null, pass: "" });
   const [spectatorCount, setSpectatorCount] = useState(0);
   const audio = useAudio();
   const aiTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -476,32 +482,33 @@ export default function Home() {
     if (openSetup) setShowSetup(true);
   };
 
-  const claimRole = (role: Player) => {
+  const claimRole = (role: Player, pass: string) => {
     if (!remote.code) {
       setMessage("No active match to claim.");
       return;
     }
-    const pass = window.prompt(`Enter passcode for ${role}`);
-    if (!pass) {
-      setMessage("Passcode required to claim.");
+    if (!pass.trim()) {
+      setClaimModal((prev) => ({ ...prev, error: "Passcode required" }));
       return;
     }
-    if (
-      remote.passcodes[role] &&
-      remote.passcodes[role] !== pass
-    ) {
-      setMessage("Passcode incorrect.");
+    if (remote.passcodes[role] && remote.passcodes[role] !== pass.trim()) {
+      setClaimModal((prev) => ({ ...prev, error: "Passcode incorrect" }));
       return;
     }
     if (!remote.passcodes[role]) {
       setRemote((prev) => ({
         ...prev,
-        passcodes: { ...prev.passcodes, [role]: pass }
+        passcodes: { ...prev.passcodes, [role]: pass.trim() }
       }));
-      if (role === "X") setPassX(pass);
-      if (role === "O") setPassO(pass);
-      savePrefs({ name: myName, passX: role === "X" ? pass : passX, passO: role === "O" ? pass : passO });
+      if (role === "X") setPassX(pass.trim());
+      if (role === "O") setPassO(pass.trim());
+      savePrefs({
+        name: myName,
+        passX: role === "X" ? pass.trim() : passX,
+        passO: role === "O" ? pass.trim() : passO
+      });
     }
+    setClaimModal({ open: false, role: null, pass: "" });
     disconnectRemote(false);
     setMatchNameInput(remote.matchName);
     connectRemote(remote.code, role);
@@ -1099,13 +1106,17 @@ export default function Home() {
                 <div className="flex gap-2">
                   <button
                     className="px-3 py-2 rounded-lg border border-cyan-400/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20 text-xs"
-                    onClick={() => claimRole("X")}
+                    onClick={() =>
+                      setClaimModal({ open: true, role: "X", pass: "", error: undefined })
+                    }
                   >
                     Claim X
                   </button>
                   <button
                     className="px-3 py-2 rounded-lg border border-emerald-400/40 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/20 text-xs"
-                    onClick={() => claimRole("O")}
+                    onClick={() =>
+                      setClaimModal({ open: true, role: "O", pass: "", error: undefined })
+                    }
                   >
                     Claim O
                   </button>
@@ -1227,6 +1238,59 @@ export default function Home() {
           currentPlayer={game.currentPlayer}
           onPick={handleRpsChoice}
         />
+      )}
+      {claimModal.open && claimModal.role && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6 w-full max-w-md space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-slate-400">Take over a seat</p>
+                <h3 className="text-lg font-semibold text-slate-100">
+                  Claim {claimModal.role}
+                </h3>
+              </div>
+              <button
+                className="text-slate-400 hover:text-slate-200 text-sm"
+                onClick={() => setClaimModal({ open: false, role: null, pass: "", error: undefined })}
+              >
+                Close
+              </button>
+            </div>
+            <p className="text-sm text-slate-400">
+              Enter the passcode for {claimModal.role} to join the match.
+            </p>
+            <label className="text-sm text-slate-300 space-y-1">
+              Passcode
+              <input
+                value={claimModal.pass}
+                onChange={(e) =>
+                  setClaimModal((prev) => ({ ...prev, pass: e.target.value, error: undefined }))
+                }
+                className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+                placeholder="Enter passcode"
+              />
+            </label>
+            {claimModal.error && (
+              <div className="text-xs text-amber-300 bg-amber-500/10 border border-amber-400/30 rounded-lg px-3 py-2">
+                {claimModal.error}
+              </div>
+            )}
+            <div className="flex items-center justify-end gap-3">
+              <button
+                className="px-4 py-2 rounded-lg border border-slate-700 bg-slate-800/60 text-slate-300 hover:border-slate-500/60"
+                onClick={() => setClaimModal({ open: false, role: null, pass: "", error: undefined })}
+              >
+                Cancel
+              </button>
+              <button
+                className="px-4 py-2 rounded-lg border border-cyan-400/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20"
+                onClick={() => claimRole(claimModal.role!, claimModal.pass)}
+              >
+                Claim seat
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </main>
   );
