@@ -182,6 +182,14 @@ export default function Home() {
     pass: string;
     error?: string;
   }>({ open: false, role: null, pass: "" });
+  const [deleteModal, setDeleteModal] = useState<{
+    open: boolean;
+    code: string;
+    matchName: string;
+    pass: string;
+    error?: string;
+  }>({ open: false, code: "", matchName: "", pass: "" });
+  const [newMatchConfirm, setNewMatchConfirm] = useState(false);
   const [spectatorCount, setSpectatorCount] = useState(0);
   const audio = useAudio();
   const aiTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -467,6 +475,16 @@ export default function Home() {
     connectRemote(entry.code, "spectator");
   };
 
+  const confirmNewMatch = () => {
+    disconnectRemote();
+    setGame(createInitialState());
+    setShowSetup(true);
+    setMode("none");
+    setCreateModal("none");
+    setMessage(null);
+    setNewMatchConfirm(false);
+  };
+
   const disconnectRemote = (openSetup = true) => {
     channelRef.current?.unsubscribe();
     channelRef.current = null;
@@ -512,6 +530,34 @@ export default function Home() {
     disconnectRemote(false);
     setMatchNameInput(remote.matchName);
     connectRemote(remote.code, role);
+  };
+
+  const handleDeleteMatch = async () => {
+    if (!deleteModal.code) return;
+    if (!supabase) {
+      setDeleteModal((prev) => ({ ...prev, error: "Online play not configured." }));
+      return;
+    }
+    const passInput = deleteModal.pass.trim();
+    try {
+      const { data, error } = await supabase
+        .from("matches")
+        .select("pass_x")
+        .eq("code", deleteModal.code)
+        .maybeSingle();
+      if (error) throw error;
+      const stored = data?.pass_x ?? "";
+      if (stored !== passInput) {
+        setDeleteModal((prev) => ({ ...prev, error: "Passcode incorrect." }));
+        return;
+      }
+      await supabase.from("matches").delete().eq("code", deleteModal.code);
+      setLobbyEntries((prev) => prev.filter((l) => l.code !== deleteModal.code));
+      setMessage("Match deleted.");
+      setDeleteModal({ open: false, code: "", matchName: "", pass: "" });
+    } catch (err) {
+      setDeleteModal((prev) => ({ ...prev, error: "Unable to delete. Check passcode." }));
+    }
   };
 
   const handleRemotePayload = (payload: RemotePayload) => {
@@ -958,18 +1004,34 @@ export default function Home() {
                   <button
                     key={entry.code}
                     onClick={() => startSpectate(entry)}
-                    className="w-full text-left px-3 py-3 hover:bg-slate-800/60 grid grid-cols-[2fr_1fr_1fr] gap-2 items-center"
+                    className="relative w-full text-left px-3 py-3 hover:bg-slate-800/60 grid grid-cols-[2fr_1fr_1fr] gap-2 items-center"
                   >
                     <div>
                       <div className="font-semibold text-slate-100">{entry.matchName}</div>
                       <div className="text-[11px] text-slate-500 font-mono">{entry.code}</div>
                     </div>
                     <div className="text-sm text-slate-300">
-                      {entry.hasO ? "In progress" : "Needs O"}
+                      {entry.hasO ? "In progress" : "Looking for opponent"}
                     </div>
                     <div className="text-right text-xs text-slate-500">
                       {new Date(entry.updated).toLocaleTimeString()}
                     </div>
+                    <button
+                      className="absolute top-2 right-2 text-slate-500 hover:text-amber-300 text-xs border border-slate-700 rounded px-1"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteModal({
+                          open: true,
+                          code: entry.code,
+                          matchName: entry.matchName,
+                          pass: "",
+                          error: undefined
+                        });
+                      }}
+                      title="Delete match"
+                    >
+                      ×
+                    </button>
                   </button>
                 ))}
               </div>
@@ -1136,18 +1198,7 @@ export default function Home() {
                     Leave match
                   </button>
                   <button
-                    onClick={() => {
-                      const ok = window.confirm(
-                        "Start a brand new match? Current progress will stay saved online."
-                      );
-                      if (!ok) return;
-                      disconnectRemote();
-                      setGame(createInitialState());
-                      setShowSetup(true);
-                      setMode("none");
-                      setCreateModal("none");
-                      setMessage(null);
-                    }}
+                    onClick={() => setNewMatchConfirm(true)}
                     className="px-4 py-2 rounded-xl border transition bg-emerald-500/20 text-emerald-200 border-emerald-400/30 hover:bg-emerald-500/30"
                   >
                     New match
@@ -1287,6 +1338,94 @@ export default function Home() {
                 onClick={() => claimRole(claimModal.role!, claimModal.pass)}
               >
                 Claim seat
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {deleteModal.open && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6 w-full max-w-md space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-slate-400">Remove match</p>
+                <h3 className="text-lg font-semibold text-slate-100">
+                  Delete {deleteModal.matchName} ({deleteModal.code})
+                </h3>
+              </div>
+              <button
+                className="text-slate-400 hover:text-slate-200 text-sm"
+                onClick={() => setDeleteModal({ open: false, code: "", matchName: "", pass: "" })}
+              >
+                Close
+              </button>
+            </div>
+            <p className="text-sm text-slate-400">
+              Enter the X passcode to delete this game from the lobby.
+            </p>
+            <label className="text-sm text-slate-300 space-y-1">
+              Passcode (X)
+              <input
+                value={deleteModal.pass}
+                onChange={(e) =>
+                  setDeleteModal((prev) => ({ ...prev, pass: e.target.value, error: undefined }))
+                }
+                className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400/40"
+                placeholder="Enter X passcode"
+              />
+            </label>
+            {deleteModal.error && (
+              <div className="text-xs text-amber-300 bg-amber-500/10 border border-amber-400/30 rounded-lg px-3 py-2">
+                {deleteModal.error}
+              </div>
+            )}
+            <div className="flex items-center justify-end gap-3">
+              <button
+                className="px-4 py-2 rounded-lg border border-slate-700 bg-slate-800/60 text-slate-300 hover:border-slate-500/60"
+                onClick={() => setDeleteModal({ open: false, code: "", matchName: "", pass: "" })}
+              >
+                Cancel
+              </button>
+              <button
+                className="px-4 py-2 rounded-lg border border-amber-400/40 bg-amber-500/15 text-amber-100 hover:bg-amber-500/25"
+                onClick={handleDeleteMatch}
+              >
+                Delete match
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {newMatchConfirm && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6 w-full max-w-md space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-slate-400">Start fresh</p>
+                <h3 className="text-lg font-semibold text-slate-100">Begin a new match?</h3>
+              </div>
+              <button
+                className="text-slate-400 hover:text-slate-200 text-sm"
+                onClick={() => setNewMatchConfirm(false)}
+              >
+                Close
+              </button>
+            </div>
+            <p className="text-sm text-slate-400">
+              Current online progress stays saved. You can rejoin from the lobby later.
+            </p>
+            <div className="flex items-center justify-end gap-3">
+              <button
+                className="px-4 py-2 rounded-lg border border-slate-700 bg-slate-800/60 text-slate-300 hover:border-slate-500/60"
+                onClick={() => setNewMatchConfirm(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="px-4 py-2 rounded-lg border border-emerald-400/40 bg-emerald-500/15 text-emerald-100 hover:bg-emerald-500/25"
+                onClick={confirmNewMatch}
+              >
+                Start new match
               </button>
             </div>
           </div>
