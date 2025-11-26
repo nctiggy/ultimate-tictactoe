@@ -16,6 +16,7 @@ import {
   playMove,
   randomRpsChoice,
   serializeState,
+  submitFinalRpsChoice,
   submitRpsChoice
 } from "../lib/game";
 import { supabase } from "../lib/supabaseClient";
@@ -400,6 +401,9 @@ export default function Home() {
     if (game.macroWinner) {
       return `${game.names[game.macroWinner]} wins the galaxy!`;
     }
+    if (game.pendingFinalRps) {
+      return "Galaxy tie! Best of 3 Rock Paper Scissors Lizard Spock";
+    }
     if (game.pendingRpsBoard !== null) {
       return "Resolve the tied board with Rock Paper Scissors Lizard Spock";
     }
@@ -457,8 +461,24 @@ export default function Home() {
     }
 
     const actor = game.currentPlayer;
-    const result = submitRpsChoice(game, game.currentPlayer, choice);
-    setGame(result.state);
+    if (game.pendingFinalRps) {
+      const result = submitFinalRpsChoice(game, actor, choice);
+      setGame(result.state);
+
+      if (result.error) {
+        setMessage(result.error);
+        return;
+      }
+
+      if (result.finalWinner) {
+        setMessage(
+          `${game.names[result.finalWinner]} wins the galaxy via RPSLS!`
+        );
+        audio.win();
+      } else if (result.state.pendingFinalRps) {
+        setMessage("Final tie! Throw again.");
+        audio.rps();
+      }
 
       if (
         remote.status === "connected" &&
@@ -469,6 +489,23 @@ export default function Home() {
           kind: "rps",
           choice,
           player: actor
+        });
+      }
+      return;
+    }
+
+    const result = submitRpsChoice(game, actor, choice);
+    setGame(result.state);
+
+    if (
+      remote.status === "connected" &&
+      game.bots[actor] === "none" &&
+      remote.role === actor
+    ) {
+      sendRemoteEvent({
+        kind: "rps",
+        choice,
+        player: actor
       });
     }
 
@@ -665,6 +702,13 @@ export default function Home() {
           onPick={handleRpsChoice}
         />
       )}
+      {game.pendingFinalRps && (
+        <FinalRpsOverlay
+          score={game.finalRps?.score ?? { X: 0, O: 0 }}
+          currentPlayer={game.currentPlayer}
+          onPick={handleRpsChoice}
+        />
+      )}
     </main>
   );
 }
@@ -824,6 +868,57 @@ function RpsOverlay({
               key={c.key}
               onClick={() => onPick(c.key)}
               className="rounded-xl border border-slate-700/70 bg-slate-800/60 hover:border-cyan-400/60 hover:bg-cyan-500/10 transition px-3 py-3 flex items-center gap-2 text-left"
+            >
+              <span className="text-xl">{c.emoji}</span>
+              <div>
+                <div className="font-semibold">{c.label}</div>
+                <div className="text-[11px] text-slate-500">{c.key}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FinalRpsOverlay({
+  score,
+  currentPlayer,
+  onPick
+}: {
+  score: { X: number; O: number };
+  currentPlayer: Player;
+  onPick: (choice: RpsChoice) => void;
+}) {
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-30">
+      <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6 max-w-md w-full shadow-2xl space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm text-amber-300">Galaxy tie-breaker</p>
+            <p className="text-lg font-semibold text-slate-100">
+              Best of 3 — Rock Paper Scissors Lizard Spock
+            </p>
+          </div>
+          <div className="text-xs text-slate-500">
+            Score: X {score.X} - O {score.O}
+          </div>
+        </div>
+        <div className="flex items-center justify-between">
+          <div className="px-3 py-1 rounded-full text-xs uppercase tracking-wide bg-indigo-500/15 text-indigo-200 border border-indigo-400/40">
+            {currentPlayer}&apos;s pick
+          </div>
+          <span className="text-xs text-slate-500 text-right">
+            First to 2 wins the match
+          </span>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {RPS_CHOICES.map((c) => (
+            <button
+              key={c.key}
+              onClick={() => onPick(c.key)}
+              className="rounded-xl border border-slate-700/70 bg-slate-800/60 hover:border-amber-400/60 hover:bg-amber-500/10 transition px-3 py-3 flex items-center gap-2 text-left"
             >
               <span className="text-xl">{c.emoji}</span>
               <div>

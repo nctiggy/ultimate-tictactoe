@@ -8,6 +8,13 @@ export type RpsState = {
   lastOutcome?: Player | "tie";
 };
 
+export type FinalRpsState = {
+  picks: Partial<Record<Player, RpsChoice>>;
+  lastOutcome?: Player | "tie";
+  score: Record<Player, number>;
+  rounds: number;
+};
+
 export type MicroBoardState = {
   cells: Cell[]; // length 9
   winner: Player | "CAT" | null;
@@ -20,6 +27,8 @@ export type GameState = {
   currentPlayer: Player;
   nextBoard: number | null; // which micro board index must be played next; null = any open
   pendingRpsBoard: number | null;
+  pendingFinalRps: boolean;
+  finalRps: FinalRpsState | null;
   names: Record<Player, string>;
   bots: Record<Player, BotLevel>;
 };
@@ -55,6 +64,8 @@ export function createInitialState(): GameState {
     currentPlayer: "X",
     nextBoard: null,
     pendingRpsBoard: null,
+    pendingFinalRps: false,
+    finalRps: null,
     names: { ...defaultNames },
     bots: { X: "none", O: "none" }
   };
@@ -82,7 +93,7 @@ export function determineMacroWinner(boards: MicroBoardState[]): Player | null {
 }
 
 export function getAllowedBoards(state: GameState): number[] {
-  if (state.pendingRpsBoard !== null) return [];
+  if (state.pendingRpsBoard !== null || state.pendingFinalRps) return [];
 
   if (state.nextBoard === null) {
     return state.boards
@@ -154,6 +165,12 @@ export function playMove(
     nextBoard = null; // target board is closed; next player chooses any open board
   }
 
+  const allBoardsClosed = updatedBoards.every((b) => b.winner !== null);
+  if (!macroWinner && allBoardsClosed && pendingRpsBoard === null) {
+    pendingFinalRps = true;
+    macroWinner = null;
+  }
+
   const nextPlayer: Player = state.currentPlayer === "X" ? "O" : "X";
 
   return {
@@ -163,7 +180,17 @@ export function playMove(
       macroWinner,
       currentPlayer: nextPlayer,
       nextBoard,
-      pendingRpsBoard
+      pendingRpsBoard,
+      pendingFinalRps,
+      finalRps:
+        pendingFinalRps && !state.finalRps
+          ? {
+              picks: {},
+              lastOutcome: undefined,
+              score: { X: 0, O: 0 },
+              rounds: 0
+            }
+          : state.finalRps
     }
   };
 }
@@ -377,6 +404,62 @@ export function chooseAIMove(
 export function randomRpsChoice(): RpsChoice {
   const options: RpsChoice[] = ["rock", "paper", "scissors", "lizard", "spock"];
   return options[Math.floor(Math.random() * options.length)];
+}
+
+export function submitFinalRpsChoice(
+  state: GameState,
+  player: Player,
+  choice: RpsChoice
+): { state: GameState; error?: string; finalWinner?: Player } {
+  if (!state.pendingFinalRps || !state.finalRps) {
+    return { state, error: "No final RPSLS pending." };
+  }
+
+  const picks = { ...state.finalRps.picks, [player]: choice };
+  let finalRps: FinalRpsState = { ...state.finalRps, picks };
+  let macroWinner = state.macroWinner;
+  let pendingFinalRps = state.pendingFinalRps;
+  let currentPlayer: Player = state.currentPlayer;
+  let finalWinner: Player | undefined;
+
+  if (picks.X && picks.O) {
+    const outcome = compareRps(picks.X, picks.O);
+    if (outcome === "tie") {
+      finalRps = { ...finalRps, picks: {}, lastOutcome: "tie" };
+      currentPlayer = player === "X" ? "O" : "X";
+    } else {
+      const winningPlayer: Player = outcome === "a" ? "X" : "O";
+      finalRps = {
+        ...finalRps,
+        picks: {},
+        lastOutcome: winningPlayer,
+        score: {
+          ...finalRps.score,
+          [winningPlayer]: finalRps.score[winningPlayer] + 1
+        },
+        rounds: finalRps.rounds + 1
+      };
+      if (finalRps.score[winningPlayer] + 1 >= 2) {
+        macroWinner = winningPlayer;
+        pendingFinalRps = false;
+        finalWinner = winningPlayer;
+      }
+      currentPlayer = player === "X" ? "O" : "X";
+    }
+  } else {
+    currentPlayer = player === "X" ? "O" : "X";
+  }
+
+  return {
+    state: {
+      ...state,
+      finalRps,
+      pendingFinalRps,
+      macroWinner,
+      currentPlayer
+    },
+    finalWinner
+  };
 }
 
 function minimax(
