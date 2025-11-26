@@ -33,11 +33,26 @@ type RemoteState = {
   opponentOnline: boolean;
   lastEvent?: string;
   spectator: boolean;
+  passcodes: Record<Player, string>;
+  matchName: string;
 };
 
 type RemotePayload =
-  | { from: Player; kind: "move"; board: number; cell: number; player: Player }
-  | { from: Player; kind: "rps"; choice: RpsChoice; player: Player }
+  | {
+      from: Player;
+      kind: "move";
+      board: number;
+      cell: number;
+      player: Player;
+      pass?: string;
+    }
+  | {
+      from: Player;
+      kind: "rps";
+      choice: RpsChoice;
+      player: Player;
+      pass?: string;
+    }
   | { from: Player; kind: "state"; state: GameState };
 
 type RemoteOutbound =
@@ -125,9 +140,14 @@ export default function Home() {
     role: "X",
     status: "idle",
     opponentOnline: false,
-    spectator: false
+    spectator: false,
+    passcodes: { X: "", O: "" },
+    matchName: ""
   });
   const [remoteCodeInput, setRemoteCodeInput] = useState("");
+  const [passX, setPassX] = useState("");
+  const [passO, setPassO] = useState("");
+  const [matchNameInput, setMatchNameInput] = useState("");
   const [showSetup, setShowSetup] = useState(true);
   const audio = useAudio();
   const aiTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -286,7 +306,9 @@ export default function Home() {
       status: "idle",
       opponentOnline: false,
       lastEvent: undefined,
-      spectator: false
+      spectator: false,
+      matchName: "",
+      passcodes: { X: passX, O: passO }
     }));
     setShowSetup(true);
   };
@@ -295,6 +317,14 @@ export default function Home() {
     if (!game) return;
     if (remote.role !== "spectator" && payload.from === remote.role) return;
     setRemote((prev) => ({ ...prev, lastEvent: `${payload.kind}` }));
+
+    if (payload.kind === "move" || payload.kind === "rps") {
+      const expected = remote.passcodes[payload.player];
+      if (expected && payload.pass !== expected) {
+        setMessage("Ignored remote action: wrong passcode for role.");
+        return;
+      }
+    }
 
     if (payload.kind === "move") {
       setGame((prev) => {
@@ -324,10 +354,14 @@ export default function Home() {
 
   const sendRemoteEvent = (payload: RemoteOutbound) => {
     if (remote.status !== "connected") return;
+    const pass =
+      payload.kind === "move" || payload.kind === "rps"
+        ? remote.passcodes[payload.player]
+        : undefined;
     channelRef.current?.send({
       type: "broadcast",
       event: "game",
-      payload: { ...payload, from: remote.role }
+      payload: { ...payload, from: remote.role, pass }
     });
   };
 
@@ -358,12 +392,18 @@ export default function Home() {
         bots: { X: "none", O: "none" }
       };
     });
+    const passcodes = {
+      X: passX,
+      O: passO
+    };
     setRemote({
       code,
       role,
       status: "connecting",
       opponentOnline: false,
-      spectator: role === "spectator"
+      spectator: role === "spectator",
+      passcodes,
+      matchName: matchNameInput || code
     });
 
     const channel = supabase.channel(`utt-${code}`, {
@@ -384,10 +424,24 @@ export default function Home() {
         if (status === "SUBSCRIBED") {
           if (role !== "spectator") {
             channel
-              .track({ role, name: game?.names[role] ?? role })
+              .track({
+                role,
+                name: game?.names[role] ?? role,
+                code,
+                matchName: matchNameInput || code,
+                timestamp: Date.now()
+              })
               .catch(() => {});
           } else {
-            channel.track({ role, name: "spectator" }).catch(() => {});
+            channel
+              .track({
+                role,
+                name: "spectator",
+                code,
+                matchName: matchNameInput || code,
+                timestamp: Date.now()
+              })
+              .catch(() => {});
           }
           setRemote((prev) => ({ ...prev, status: "connected" }));
           setMessage(`Connected to match ${code}`);
@@ -574,7 +628,7 @@ export default function Home() {
             <div className="flex items-center gap-2">
               {inSession && remote.code && (
                 <div className="px-3 py-1 rounded-full border border-indigo-400/40 bg-indigo-500/10 text-indigo-100 text-xs">
-                  Code: {remote.code} · Role: {remote.role}
+                  {remote.matchName || "Match"} · Code: {remote.code} · Role: {remote.role}
                 </div>
               )}
               <button
@@ -671,7 +725,13 @@ export default function Home() {
                 <RemoteCard
                   remote={remote}
                   codeInput={remoteCodeInput}
+                  matchNameInput={matchNameInput}
+                  passX={passX}
+                  passO={passO}
                   onCodeChange={setRemoteCodeInput}
+                  onMatchNameChange={setMatchNameInput}
+                  onPassXChange={setPassX}
+                  onPassOChange={setPassO}
                   onConnect={connectRemote}
                   onDisconnect={disconnectRemote}
                   onRoleChange={updateRemoteRole}
@@ -936,7 +996,13 @@ function FinalRpsOverlay({
 function RemoteCard({
   remote,
   codeInput,
+  matchNameInput,
+  passX,
+  passO,
   onCodeChange,
+  onMatchNameChange,
+  onPassXChange,
+  onPassOChange,
   onConnect,
   onDisconnect,
   onRoleChange,
@@ -946,6 +1012,12 @@ function RemoteCard({
   remote: RemoteState;
   codeInput: string;
   onCodeChange: (code: string) => void;
+  matchNameInput: string;
+  passX: string;
+  passO: string;
+  onMatchNameChange: (name: string) => void;
+  onPassXChange: (val: string) => void;
+  onPassOChange: (val: string) => void;
   onConnect: (code: string, role: RemoteRole) => void;
   onDisconnect: () => void;
   onRoleChange: (role: RemoteRole) => void;
@@ -996,6 +1068,35 @@ function RemoteCard({
           className="flex-1 rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/40"
           placeholder="Match code"
         />
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs text-slate-400">
+        <label className="space-y-1">
+          <span>Match name</span>
+          <input
+            value={matchNameInput}
+            onChange={(e) => onMatchNameChange(e.target.value)}
+            className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/40"
+            placeholder="Optional"
+          />
+        </label>
+        <label className="space-y-1">
+          <span>Passcode for X</span>
+          <input
+            value={passX}
+            onChange={(e) => onPassXChange(e.target.value)}
+            className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/40"
+            placeholder="Optional"
+          />
+        </label>
+        <label className="space-y-1">
+          <span>Passcode for O</span>
+          <input
+            value={passO}
+            onChange={(e) => onPassOChange(e.target.value)}
+            className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/40"
+            placeholder="Optional"
+          />
+        </label>
       </div>
       <div className="flex gap-2">
         <button
