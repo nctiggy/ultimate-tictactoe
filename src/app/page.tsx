@@ -182,6 +182,7 @@ export default function Home() {
   const channelRef = useRef<RealtimeChannel | null>(null);
   const lobbyChannelRef = useRef<RealtimeChannel | null>(null);
   const clientIdRef = useRef<string>(Math.random().toString(36).slice(2, 10));
+  const presenceKeyRef = useRef<string>("");
   const [lobbyEntries, setLobbyEntries] = useState<
     Array<{ code: string; matchName: string; hasX: boolean; hasO: boolean; updated: number }>
   >([]);
@@ -637,8 +638,10 @@ export default function Home() {
       matchName: matchNameInput || remote.matchName || code
     });
 
+    const presenceKey = `${clientIdRef.current}-${role}`;
+    presenceKeyRef.current = presenceKey;
     const channel = supabase.channel(`utt-${code}`, {
-      config: { presence: { key: role } }
+      config: { presence: { key: presenceKey } }
     });
     channelRef.current = channel;
 
@@ -678,42 +681,35 @@ export default function Home() {
         handleRemotePayload(payload as RemotePayload)
       )
       .on("presence", { event: "sync" }, () => {
-        const others = channel.presenceState();
-        const othersOnline = Object.keys(others).some((k) => k !== role);
+        const others = channel.presenceState() as Record<string, Array<{ role: RemoteRole }>>;
+        const selfKey = presenceKeyRef.current;
         let spectators = 0;
-        Object.entries(others).forEach(([key, value]) => {
-          if (key !== role) {
-            value.forEach((entry: any) => {
-              if (entry.role === "spectator") spectators += 1;
-            });
-          }
+        let opponents = false;
+        Object.entries(others).forEach(([key, arr]) => {
+          arr.forEach((entry) => {
+            const isSelf = key === selfKey;
+            if (!isSelf && (entry.role === "X" || entry.role === "O")) {
+              opponents = true;
+            }
+            if (!isSelf && entry.role === "spectator") {
+              spectators += 1;
+            }
+          });
         });
         setSpectatorCount(spectators);
-        setRemote((prev) => ({ ...prev, opponentOnline: othersOnline }));
+        setRemote((prev) => ({ ...prev, opponentOnline: opponents }));
       })
       .subscribe((status) => {
         if (status === "SUBSCRIBED") {
-          if (role !== "spectator") {
-            channel
-              .track({
-                role,
-                name: game?.names[role] ?? role,
-                code,
-                matchName: matchNameInput || code,
-                timestamp: Date.now()
-              })
-              .catch(() => {});
-          } else {
-            channel
-              .track({
-                role,
-                name: "spectator",
-                code,
-                matchName: matchNameInput || code,
-                timestamp: Date.now()
-              })
-              .catch(() => {});
-          }
+          channel
+            .track({
+              role,
+              name: role === "spectator" ? "spectator" : game?.names[role] ?? role,
+              code,
+              matchName: matchNameInput || code,
+              timestamp: Date.now()
+            })
+            .catch(() => {});
           setRemote((prev) => ({ ...prev, status: "connected" }));
           setMessage(`Connected to match ${code}`);
           loadPersisted.finally(() => sendRemoteStateSnapshot(channel));
