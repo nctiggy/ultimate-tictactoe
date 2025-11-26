@@ -1135,7 +1135,7 @@ export default function Home() {
                     onDisconnect={disconnectRemote}
                     onRoleChange={updateRemoteRole}
                     realtimeAvailable={realtimeAvailable}
-                    lobbies={lobbyCodes}
+                    lobbies={lobbyEntries}
                   />
                 )}
                 <div className="text-sm text-slate-400 space-y-2">
@@ -1460,7 +1460,7 @@ function RemoteCard({
   onDisconnect: () => void;
   onRoleChange: (role: RemoteRole) => void;
   realtimeAvailable: boolean;
-  lobbies: Array<{ code: string; role: RemoteRole; timestamp: number }>;
+  lobbies: Array<{ code: string; matchName: string; hasX: boolean; hasO: boolean; updated: number }>;
 }) {
   const handleHost = (role: Player) => {
     onRoleChange(role);
@@ -1613,9 +1613,11 @@ function RemoteCard({
               className="flex items-center justify-between gap-2 rounded-lg border border-slate-700/60 bg-slate-800/50 px-3 py-2"
             >
               <div>
-                <div className="font-mono text-sm text-slate-100">{lobby.code}</div>
+                <div className="font-semibold text-slate-100">
+                  {lobby.matchName} ({lobby.code})
+                </div>
                 <div className="text-[11px] text-slate-500">
-                  host: {lobby.role === "spectator" ? "unknown" : lobby.role}
+                  {lobby.hasO ? "In progress" : "Needs O"}
                 </div>
               </div>
               <div className="flex gap-2">
@@ -1631,18 +1633,11 @@ function RemoteCard({
                 <button
                   onClick={() => {
                     onCodeChange(lobby.code);
-                    onConnect(lobby.code, "X");
-                  }}
-                  className="px-2 py-1 text-xs rounded-md border border-cyan-400/50 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20"
-                >
-                  Join X
-                </button>
-                <button
-                  onClick={() => {
-                    onCodeChange(lobby.code);
                     onConnect(lobby.code, "O");
                   }}
                   className="px-2 py-1 text-xs rounded-md border border-emerald-400/50 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/20"
+                  disabled={lobby.hasO}
+                  title={lobby.hasO ? "O already taken" : "Join as O"}
                 >
                   Join O
                 </button>
