@@ -846,92 +846,77 @@ export default function Home() {
                     />
                   </label>
                 </div>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="flex gap-2">
                   <button
                     onClick={() => {
                       const fresh = createInitialState();
-                      fresh.names[pendingRole] = myName || `Player ${pendingRole}`;
+                      fresh.names.X = myName || "Player X";
+                      fresh.names.O = "Player O";
                       setGame(fresh);
                       setMode("online");
                       setShowSetup(false);
-                      connectRemote(
-                        remoteCodeInput || randomCode(),
-                        "X"
-                      );
+                      connectRemote(remoteCodeInput || randomCode(), "X");
+                      savePrefs({ name: myName, passX });
                     }}
-                    className="px-3 py-2 rounded-lg border border-cyan-400/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20"
+                    className="px-4 py-2 rounded-lg border border-cyan-400/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20"
                   >
-                    Host as X
+                    Create Game (You are X)
                   </button>
+                </div>
+                <div className="grid grid-cols-3 gap-3 text-sm text-slate-300">
+                  <label className="space-y-1 col-span-3">
+                    Join with code (as O)
+                    <div className="grid grid-cols-3 gap-2 mt-1">
+                      <input
+                        value={remoteCodeInput}
+                        onChange={(e) => setRemoteCodeInput(e.target.value.toUpperCase())}
+                        className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+                        placeholder="ABC1"
+                      />
+                      <input
+                        value={myName}
+                        onChange={(e) => setMyName(e.target.value)}
+                        className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+                        placeholder="Your name"
+                      />
+                      <input
+                        value={passO}
+                        onChange={(e) => setPassO(e.target.value)}
+                        className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+                        placeholder="Pass O"
+                      />
+                    </div>
+                  </label>
+                </div>
+                <div className="flex gap-2">
                   <button
                     onClick={() => {
+                      if (!remoteCodeInput) return;
                       const fresh = createInitialState();
-                      fresh.names[pendingRole] = myName || `Player ${pendingRole}`;
+                      fresh.names.O = myName || "Player O";
                       setGame(fresh);
                       setMode("online");
                       setShowSetup(false);
-                      connectRemote(
-                        remoteCodeInput || randomCode(),
-                        "O"
-                      );
+                      savePrefs({ name: myName, passO });
+                      connectRemote(remoteCodeInput, "O");
                     }}
-                    className="px-3 py-2 rounded-lg border border-cyan-400/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20"
+                    className="flex-1 px-3 py-2 rounded-lg border border-indigo-400/40 bg-indigo-500/10 text-indigo-100 hover:bg-indigo-500/20"
                   >
-                    Host as O
+                    Join as O
                   </button>
                   <button
                     onClick={() => {
                       if (!remoteCodeInput) return;
                       const fresh = createInitialState();
-                      fresh.names[pendingRole] = myName || `Player ${pendingRole}`;
                       setGame(fresh);
                       setMode("online");
                       setShowSetup(false);
-                      connectRemote(remoteCodeInput, pendingRole);
+                      connectRemote(remoteCodeInput, "spectator");
                     }}
-                    className="px-3 py-2 rounded-lg border border-indigo-400/40 bg-indigo-500/10 text-indigo-100 hover:bg-indigo-500/20"
+                    className="px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/60 text-slate-300 hover:border-slate-500/60"
                   >
-                    Join as {pendingRole}
+                    Spectate
                   </button>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <label className="space-y-1">
-                    Join as O — Pass O
-                    <input
-                      value={passO}
-                      onChange={(e) => setPassO(e.target.value)}
-                      className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
-                    />
-                  </label>
-                  <div className="flex gap-2 pt-5">
-                    <button
-                      onClick={() => {
-                        if (!remoteCodeInput) return;
-                        const fresh = createInitialState();
-                        fresh.names.O = myName || "Player O";
-                        setGame(fresh);
-                        setMode("online");
-                        setShowSetup(false);
-                        connectRemote(remoteCodeInput, "O");
-                      }}
-                      className="flex-1 px-3 py-2 rounded-lg border border-indigo-400/40 bg-indigo-500/10 text-indigo-100 hover:bg-indigo-500/20"
-                    >
-                      Join as O
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (!remoteCodeInput) return;
-                        const fresh = createInitialState();
-                        setGame(fresh);
-                        setMode("online");
-                        setShowSetup(false);
-                        connectRemote(remoteCodeInput, "spectator");
-                      }}
-                      className="px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/60 text-slate-300 hover:border-slate-500/60"
-                    >
-                      Spectate
-                    </button>
-                  </div>
                 </div>
                 <div className="text-xs text-slate-500">
                   Use the same code and pass to rejoin. Moves from the wrong pass are ignored.
