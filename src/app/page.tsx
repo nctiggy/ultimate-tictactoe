@@ -168,6 +168,7 @@ export default function Home() {
   const [passO, setPassO] = useState("");
   const [matchNameInput, setMatchNameInput] = useState("");
   const [showSetup, setShowSetup] = useState(true);
+  const [createModal, setCreateModal] = useState<"none" | "local" | "online">("none");
   const [mode, setMode] = useState<"none" | "local" | "online">("none");
   const [myName, setMyName] = useState("Player");
   const [localNames, setLocalNames] = useState({ X: "Player X", O: "Player O" });
@@ -369,6 +370,7 @@ export default function Home() {
     fresh.names = { ...localNames };
     fresh.bots = { ...localBots };
     disconnectRemote(false);
+    setCreateModal("none");
     setMessage(null);
     setGame(fresh);
     setMode("local");
@@ -384,6 +386,7 @@ export default function Home() {
     setMatchNameInput(matchName);
     disconnectRemote(false);
     setMessage(null);
+    setCreateModal("none");
     setGame(fresh);
     setMode("online");
     setShowSetup(false);
@@ -403,6 +406,7 @@ export default function Home() {
     setGame(fresh);
     setMode("online");
     setShowSetup(false);
+    setCreateModal("none");
     connectRemote(entry.code, "spectator");
   };
 
@@ -800,97 +804,30 @@ export default function Home() {
               )}
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="rounded-xl border border-slate-800/70 p-4 bg-slate-900/50 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="font-semibold text-slate-100">Create local game</h3>
-                    <p className="text-xs text-slate-500">Hotseat or bots on this device.</p>
-                  </div>
-                  <span className="text-[11px] uppercase tracking-wide text-slate-500">Local</span>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <button
+                className="rounded-xl border border-emerald-400/40 bg-emerald-500/10 text-emerald-100 px-4 py-4 text-left hover:bg-emerald-500/20"
+                onClick={() => {
+                  disconnectRemote(false);
+                  setMode("local");
+                  setCreateModal("local");
+                }}
+              >
+                <div className="font-semibold text-lg">Create local game</div>
+                <div className="text-xs text-emerald-200/80">Hotseat or bots on this device.</div>
+              </button>
+              <button
+                className="rounded-xl border border-indigo-400/40 bg-indigo-500/10 text-indigo-100 px-4 py-4 text-left hover:bg-indigo-500/20"
+                onClick={() => {
+                  setMode("online");
+                  setCreateModal("online");
+                }}
+              >
+                <div className="font-semibold text-lg">Create online game</div>
+                <div className="text-xs text-indigo-200/80">
+                  You will be X. We generate a shareable code automatically.
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <PlayerCard
-                    player="X"
-                    name={localNames.X}
-                    botLevel={localBots.X}
-                    onNameChange={updateName}
-                    onBotChange={updateBot}
-                  />
-                  <PlayerCard
-                    player="O"
-                    name={localNames.O}
-                    botLevel={localBots.O}
-                    onNameChange={updateName}
-                    onBotChange={updateBot}
-                  />
-                </div>
-                <button
-                  className="w-full px-4 py-2 rounded-lg border border-emerald-400/40 bg-emerald-500/15 text-emerald-100 hover:bg-emerald-500/25"
-                  onClick={startLocalGame}
-                >
-                  Start local game
-                </button>
-              </div>
-
-              <div className="rounded-xl border border-slate-800/70 p-4 bg-slate-900/50 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="font-semibold text-slate-100">Create online game</h3>
-                    <p className="text-xs text-slate-500">
-                      You will be X. We generate a shareable code automatically.
-                    </p>
-                  </div>
-                  <span
-                    className={clsx(
-                      "px-2 py-1 rounded-full text-[11px] uppercase tracking-wide border",
-                      realtimeAvailable
-                        ? "border-indigo-400/40 text-indigo-100 bg-indigo-500/10"
-                        : "border-amber-400/40 text-amber-200 bg-amber-500/10"
-                    )}
-                  >
-                    {realtimeAvailable ? "Supabase ready" : "Realtime disabled"}
-                  </span>
-                </div>
-                <label className="text-sm text-slate-300 space-y-1">
-                  Your name
-                  <input
-                    value={myName}
-                    onChange={(e) => setMyName(e.target.value)}
-                    className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
-                    placeholder="Player name"
-                  />
-                </label>
-                <label className="text-sm text-slate-300 space-y-1">
-                  Game name
-                  <input
-                    value={matchNameInput}
-                    onChange={(e) => setMatchNameInput(e.target.value)}
-                    className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
-                    placeholder="My epic match"
-                  />
-                </label>
-                <label className="text-sm text-slate-300 space-y-1">
-                  Passcode for X
-                  <input
-                    value={passX}
-                    onChange={(e) => setPassX(e.target.value)}
-                    className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
-                    placeholder="Required to reclaim X"
-                  />
-                </label>
-                <button
-                  onClick={startOnlineGame}
-                  disabled={!realtimeAvailable}
-                  className="w-full px-4 py-2 rounded-lg border border-cyan-400/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20 disabled:opacity-50"
-                >
-                  Create online match (you are X)
-                </button>
-                <p className="text-xs text-slate-500">
-                  We&apos;ll show the match code after creation. Passcodes save locally so you can
-                  reclaim your seat later.
-                </p>
-              </div>
+              </button>
             </div>
 
             <div className="rounded-xl border border-slate-800/70 p-4 bg-slate-900/50 space-y-3">
@@ -930,6 +867,118 @@ export default function Home() {
               </div>
             </div>
           </div>
+
+          {createModal === "local" && (
+            <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-3xl space-y-4 shadow-2xl">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-semibold text-slate-100">Create local game</h3>
+                  <button
+                    className="text-slate-400 hover:text-slate-200 text-sm"
+                    onClick={() => setCreateModal("none")}
+                  >
+                    Close
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <PlayerCard
+                    player="X"
+                    name={localNames.X}
+                    botLevel={localBots.X}
+                    onNameChange={updateName}
+                    onBotChange={updateBot}
+                  />
+                  <PlayerCard
+                    player="O"
+                    name={localNames.O}
+                    botLevel={localBots.O}
+                    onNameChange={updateName}
+                    onBotChange={updateBot}
+                  />
+                </div>
+                <div className="flex items-center gap-3 justify-end">
+                  <button
+                    className="px-4 py-2 rounded-lg border border-slate-700 bg-slate-800/60 text-slate-300 hover:border-slate-500/60"
+                    onClick={() => setCreateModal("none")}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="px-4 py-2 rounded-lg border border-emerald-400/40 bg-emerald-500/15 text-emerald-100 hover:bg-emerald-500/25"
+                    onClick={startLocalGame}
+                  >
+                    Start local game
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {createModal === "online" && (
+            <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-xl space-y-4 shadow-2xl">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-100">Create online game</h3>
+                    <p className="text-xs text-slate-500">You will be X. Code is auto-generated.</p>
+                  </div>
+                  <button
+                    className="text-slate-400 hover:text-slate-200 text-sm"
+                    onClick={() => setCreateModal("none")}
+                  >
+                    Close
+                  </button>
+                </div>
+                <label className="text-sm text-slate-300 space-y-1">
+                  Your name
+                  <input
+                    value={myName}
+                    onChange={(e) => setMyName(e.target.value)}
+                    className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+                    placeholder="Player name"
+                  />
+                </label>
+                <label className="text-sm text-slate-300 space-y-1">
+                  Game name
+                  <input
+                    value={matchNameInput}
+                    onChange={(e) => setMatchNameInput(e.target.value)}
+                    className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+                    placeholder="My epic match"
+                  />
+                </label>
+                <label className="text-sm text-slate-300 space-y-1">
+                  Passcode for X
+                  <input
+                    value={passX}
+                    onChange={(e) => setPassX(e.target.value)}
+                    className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+                    placeholder="Required to reclaim X"
+                  />
+                </label>
+                <div className="flex items-center gap-3 justify-end">
+                  <button
+                    className="px-4 py-2 rounded-lg border border-slate-700 bg-slate-800/60 text-slate-300 hover:border-slate-500/60"
+                    onClick={() => setCreateModal("none")}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={startOnlineGame}
+                    disabled={!realtimeAvailable}
+                    className="px-4 py-2 rounded-lg border border-cyan-400/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20 disabled:opacity-50"
+                  >
+                    Create online match
+                  </button>
+                </div>
+                {!realtimeAvailable && (
+                  <p className="text-xs text-amber-300">
+                    Supabase Realtime not configured. Set env vars to enable online play.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
       <div className="max-w-6xl mx-auto flex flex-col gap-6 lg:flex-row">
