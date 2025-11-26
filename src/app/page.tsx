@@ -298,6 +298,29 @@ export default function Home() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!game) return;
+    if (
+      !game.macroWinner &&
+      !game.pendingFinalRps &&
+      game.pendingRpsBoard === null &&
+      game.boards.every((b) => b.winner !== null)
+    ) {
+      setGame({
+        ...game,
+        pendingFinalRps: true,
+        finalRps:
+          game.finalRps ?? {
+            picks: {},
+            lastOutcome: undefined,
+            score: { X: 0, O: 0 },
+            rounds: 0
+          }
+      });
+      setMessage("Galaxy tie-breaker: best of 3 RPSLS.");
+    }
+  }, [game]);
+
   const disconnectRemote = () => {
     channelRef.current?.unsubscribe();
     channelRef.current = null;
