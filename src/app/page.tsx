@@ -185,6 +185,12 @@ export default function Home() {
   const [lobbyEntries, setLobbyEntries] = useState<
     Array<{ code: string; matchName: string; hasX: boolean; hasO: boolean; updated: number }>
   >([]);
+  const [presenceEntries, setPresenceEntries] = useState<
+    Array<{ code: string; matchName: string; hasX: boolean; hasO: boolean; updated: number }>
+  >([]);
+  const [persistedEntries, setPersistedEntries] = useState<
+    Array<{ code: string; matchName: string; hasX: boolean; hasO: boolean; updated: number }>
+  >([]);
 
   useEffect(() => {
     const saved = readCookie(COOKIE_KEY);
@@ -240,7 +246,7 @@ export default function Home() {
             map.set(entry.code, existing);
           });
         });
-        setLobbyEntries(
+        setPresenceEntries(
           Array.from(map.values())
             .filter((c) => Date.now() - c.updated < LOBBY_STALE_MS)
             .sort((a, b) => b.updated - a.updated)
@@ -261,6 +267,50 @@ export default function Home() {
       lobby.unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    const client = supabase;
+    if (!client) return;
+    const loadPersisted = async () => {
+      const { data } = await client
+        .from("matches")
+        .select("code, match_name, updated_at, pass_x, pass_o")
+        .order("updated_at", { ascending: false })
+        .limit(50);
+      if (!data) return;
+      setPersistedEntries(
+        data.map((row) => ({
+          code: row.code,
+          matchName: row.match_name || row.code,
+          hasX: true,
+          hasO: Boolean(row.pass_o),
+          updated: row.updated_at ? new Date(row.updated_at).getTime() : Date.now()
+        }))
+      );
+    };
+    loadPersisted();
+    const interval = setInterval(loadPersisted, 20_000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const map = new Map<string, { code: string; matchName: string; hasX: boolean; hasO: boolean; updated: number }>();
+    persistedEntries.forEach((entry) => map.set(entry.code, entry));
+    presenceEntries.forEach((entry) => {
+      const existing = map.get(entry.code);
+      const merged = existing
+        ? {
+            ...existing,
+            hasX: entry.hasX || existing.hasX,
+            hasO: entry.hasO || existing.hasO,
+            matchName: entry.matchName || existing.matchName,
+            updated: Math.max(entry.updated, existing.updated)
+          }
+        : entry;
+      map.set(entry.code, merged);
+    });
+    setLobbyEntries(Array.from(map.values()).sort((a, b) => b.updated - a.updated));
+  }, [persistedEntries, presenceEntries]);
 
   useEffect(() => {
     const lobby = lobbyChannelRef.current;
@@ -534,6 +584,30 @@ export default function Home() {
     setMessage("Shared full state with opponent.");
   };
 
+  useEffect(() => {
+    if (!game) return;
+    if (remote.status !== "connected" || !remote.code || mode !== "online") return;
+    if (!supabase) return;
+    const client = supabase;
+    (async () => {
+      try {
+        await client
+          .from("matches")
+          .upsert({
+            code: remote.code,
+            match_name: remote.matchName || matchNameInput || remote.code,
+            state: serializeState(game),
+            pass_x: remote.passcodes.X || null,
+            pass_o: remote.passcodes.O || null,
+            updated_at: new Date().toISOString()
+          })
+          .select();
+      } catch {
+        // ignore persist failures in UI
+      }
+    })();
+  }, [game, remote.status, remote.code, mode, remote.matchName, remote.passcodes, matchNameInput]);
+
   const connectRemote = (code: string, role: RemoteRole) => {
     setShowSetup(false);
     setMode("online");
@@ -567,6 +641,37 @@ export default function Home() {
       config: { presence: { key: role } }
     });
     channelRef.current = channel;
+
+    const loadPersisted = (async () => {
+      try {
+        const res = await supabase
+          .from("matches")
+          .select("state, match_name, pass_x, pass_o")
+          .eq("code", code)
+          .maybeSingle();
+        const row = res.data;
+        if (row?.match_name) {
+          setMatchNameInput(row.match_name);
+          setRemote((prev) => ({ ...prev, matchName: row.match_name }));
+        }
+        const updatedPass = {
+          X: row?.pass_x || passcodes.X,
+          O: row?.pass_o || passcodes.O
+        };
+        if (row?.pass_x) setPassX(row.pass_x);
+        if (row?.pass_o) setPassO(row.pass_o);
+        setRemote((prev) => ({ ...prev, passcodes: updatedPass }));
+        savePrefs({ name: myName, passX: updatedPass.X, passO: updatedPass.O });
+        if (row?.state) {
+          const parsed = parseState(row.state);
+          if (parsed) {
+            setGame(parsed);
+          }
+        }
+      } catch {
+        // ignore load errors
+      }
+    })();
 
     channel
       .on("broadcast", { event: "game" }, ({ payload }) =>
@@ -611,7 +716,7 @@ export default function Home() {
           }
           setRemote((prev) => ({ ...prev, status: "connected" }));
           setMessage(`Connected to match ${code}`);
-          sendRemoteStateSnapshot(channel);
+          loadPersisted.finally(() => sendRemoteStateSnapshot(channel));
         }
       });
   };
@@ -1010,29 +1115,50 @@ export default function Home() {
                   </button>
                 </div>
               )}
-              <button
-                onClick={() => {
-                  if (inSession) {
-                    const ok = window.confirm(
-                      "Leave current match and start a new one?"
-                    );
-                    if (!ok) return;
-                    disconnectRemote();
-                  }
-                  setGame(createInitialState());
-                  setShowSetup(true);
-                  setMode("none");
-                  setMessage(null);
-                }}
-                className={clsx(
-                  "px-4 py-2 rounded-xl border transition",
-                  inSession
-                    ? "bg-amber-500/15 text-amber-100 border-amber-400/40 hover:bg-amber-500/25"
-                    : "bg-emerald-500/20 text-emerald-200 border-emerald-400/30 hover:bg-emerald-500/30"
-                )}
-              >
-                {inSession ? "Leave & reset" : "New match"}
-              </button>
+              {inSession ? (
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      disconnectRemote();
+                      setMode("none");
+                      setShowSetup(true);
+                      setMessage("Left match. Resume anytime from the lobby.");
+                    }}
+                    className="px-4 py-2 rounded-xl border transition bg-amber-500/15 text-amber-100 border-amber-400/40 hover:bg-amber-500/25"
+                  >
+                    Leave match
+                  </button>
+                  <button
+                    onClick={() => {
+                      const ok = window.confirm(
+                        "Start a brand new match? Current progress will stay saved online."
+                      );
+                      if (!ok) return;
+                      disconnectRemote();
+                      setGame(createInitialState());
+                      setShowSetup(true);
+                      setMode("none");
+                      setCreateModal("none");
+                      setMessage(null);
+                    }}
+                    className="px-4 py-2 rounded-xl border transition bg-emerald-500/20 text-emerald-200 border-emerald-400/30 hover:bg-emerald-500/30"
+                  >
+                    New match
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => {
+                    setShowSetup(true);
+                    setMode("none");
+                    setCreateModal("none");
+                    setMessage(null);
+                  }}
+                  className="px-4 py-2 rounded-xl border transition bg-emerald-500/20 text-emerald-200 border-emerald-400/30 hover:bg-emerald-500/30"
+                >
+                  New match
+                </button>
+              )}
             </div>
           </header>
 
