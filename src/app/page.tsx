@@ -150,6 +150,8 @@ export default function Home() {
   const [matchNameInput, setMatchNameInput] = useState("");
   const [showSetup, setShowSetup] = useState(true);
   const [mode, setMode] = useState<"none" | "local" | "online">("none");
+  const [myName, setMyName] = useState("Player");
+  const [pendingChoice, setPendingChoice] = useState<"local" | "online">("local");
   const audio = useAudio();
   const aiTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
