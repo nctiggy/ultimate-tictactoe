@@ -912,12 +912,15 @@ export default function Home() {
                 onClick={() => {
                   if (inSession) {
                     const ok = window.confirm(
-                      "Leave current match and reset locally?"
+                      "Leave current match and start a new one?"
                     );
                     if (!ok) return;
                     disconnectRemote();
                   }
-                  resetGame();
+                  setShowSetup(true);
+                  setSetupStage("choose");
+                  setMode("none");
+                  setMessage(null);
                 }}
                 className={clsx(
                   "px-4 py-2 rounded-xl border transition",
