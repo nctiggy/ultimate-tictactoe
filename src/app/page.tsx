@@ -451,6 +451,7 @@ export default function Home() {
     setMatchNameInput(matchName);
     disconnectRemote(false);
     setMessage(null);
+    setPassO(""); // reset any old O pass when hosting anew
     setCreateModal("none");
     setGame(fresh);
     setMode("online");
@@ -677,10 +678,13 @@ export default function Home() {
         bots: { X: "none", O: "none" }
       };
     });
-    const passcodes = {
-      X: passX,
-      O: passO
-    };
+    const passcodes =
+      role === "X"
+        ? { X: passX, O: "" }
+        : {
+            X: passX,
+            O: passO
+          };
     setRemote({
       code,
       role,
