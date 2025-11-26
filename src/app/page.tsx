@@ -24,6 +24,7 @@ import { supabase } from "../lib/supabaseClient";
 const COOKIE_KEY = "utt_state_v1";
 const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 const LOBBY_STALE_MS = 10 * 60 * 1000; // 10 minutes
+const HIDE_DELETED_MS = 90_000;
 
 type RemoteStatus = "idle" | "connecting" | "connected";
 type RemoteState = {
@@ -206,6 +207,7 @@ export default function Home() {
   const [persistedEntries, setPersistedEntries] = useState<
     Array<{ code: string; matchName: string; hasX: boolean; hasO: boolean; updated: number }>
   >([]);
+  const [hiddenCodes, setHiddenCodes] = useState<Record<string, number>>({});
 
   useEffect(() => {
     const saved = readCookie(COOKIE_KEY);
@@ -310,8 +312,17 @@ export default function Home() {
 
   useEffect(() => {
     const map = new Map<string, { code: string; matchName: string; hasX: boolean; hasO: boolean; updated: number }>();
+    const now = Date.now();
+    const prunedHidden = Object.fromEntries(
+      Object.entries(hiddenCodes).filter(([_, ts]) => now - ts < HIDE_DELETED_MS)
+    );
+    if (Object.keys(prunedHidden).length !== Object.keys(hiddenCodes).length) {
+      setHiddenCodes(prunedHidden);
+    }
+    const shouldHide = (code: string) => Boolean(prunedHidden[code]);
     persistedEntries.forEach((entry) => map.set(entry.code, entry));
     presenceEntries.forEach((entry) => {
+      if (shouldHide(entry.code)) return;
       const existing = map.get(entry.code);
       const merged = existing
         ? {
@@ -324,8 +335,9 @@ export default function Home() {
         : entry;
       map.set(entry.code, merged);
     });
-    setLobbyEntries(Array.from(map.values()).sort((a, b) => b.updated - a.updated));
-  }, [persistedEntries, presenceEntries]);
+    const filtered = Array.from(map.values()).filter((e) => !shouldHide(e.code));
+    setLobbyEntries(filtered.sort((a, b) => b.updated - a.updated));
+  }, [persistedEntries, presenceEntries, hiddenCodes]);
 
   useEffect(() => {
     const lobby = lobbyChannelRef.current;
@@ -553,6 +565,7 @@ export default function Home() {
       }
       await supabase.from("matches").delete().eq("code", deleteModal.code);
       setLobbyEntries((prev) => prev.filter((l) => l.code !== deleteModal.code));
+      setHiddenCodes((prev) => ({ ...prev, [deleteModal.code]: Date.now() }));
       setMessage("Match deleted.");
       setDeleteModal({ open: false, code: "", matchName: "", pass: "" });
     } catch (err) {
