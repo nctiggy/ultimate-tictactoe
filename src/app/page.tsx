@@ -320,9 +320,16 @@ export default function Home() {
 
     if (payload.kind === "move" || payload.kind === "rps") {
       const expected = remote.passcodes[payload.player];
-      if (expected && payload.pass !== expected) {
-        setMessage("Ignored remote action: wrong passcode for role.");
-        return;
+      if (expected) {
+        if (payload.pass !== expected) {
+          setMessage("Ignored remote action: passcode mismatch.");
+          return;
+        }
+      } else if (payload.pass) {
+        setRemote((prev) => ({
+          ...prev,
+          passcodes: { ...prev.passcodes, [payload.player]: payload.pass as string }
+        }));
       }
     }
 
