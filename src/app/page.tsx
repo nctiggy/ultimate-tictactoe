@@ -90,6 +90,26 @@ function persistState(state: GameState) {
   document.cookie = `${COOKIE_KEY}=${encodeURIComponent(raw)}; path=/; max-age=${COOKIE_MAX_AGE_SECONDS}`;
 }
 
+const PREFS_KEY = "utt_prefs_v1";
+function loadPrefs() {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(PREFS_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as {
+      name?: string;
+      passX?: string;
+      passO?: string;
+    };
+  } catch {
+    return null;
+  }
+}
+function savePrefs(prefs: { name?: string; passX?: string; passO?: string }) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+}
+
 function useAudio() {
   const ctxRef = useRef<AudioContext | null>(null);
 
@@ -160,18 +180,25 @@ export default function Home() {
     O: "none"
   });
   const [pendingRole, setPendingRole] = useState<Player>("X");
+  const [spectatorCount, setSpectatorCount] = useState(0);
   const audio = useAudio();
   const aiTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const lobbyChannelRef = useRef<RealtimeChannel | null>(null);
   const clientIdRef = useRef<string>(Math.random().toString(36).slice(2, 10));
-  const [lobbyCodes, setLobbyCodes] = useState<
-    Array<{ code: string; role: RemoteRole; timestamp: number }>
+  const [lobbyEntries, setLobbyEntries] = useState<
+    Array<{ code: string; matchName: string; hasX: boolean; hasO: boolean; updated: number }>
   >([]);
 
   useEffect(() => {
     const saved = readCookie(COOKIE_KEY);
     setGame(parseState(saved));
+    const prefs = loadPrefs();
+    if (prefs) {
+      if (prefs.name) setMyName(prefs.name);
+      if (prefs.passX) setPassX(prefs.passX);
+      if (prefs.passO) setPassO(prefs.passO);
+    }
   }, []);
 
   useEffect(() => {
@@ -189,28 +216,38 @@ export default function Home() {
       .on("presence", { event: "sync" }, () => {
         const state = lobby.presenceState() as Record<
           string,
-          Array<{ code?: string; role?: RemoteRole; timestamp?: number }>
+          Array<{
+            code?: string;
+            role?: RemoteRole;
+            timestamp?: number;
+            matchName?: string;
+          }>
         >;
-        const codes: Array<{ code: string; role: RemoteRole; timestamp: number }> = [];
+        const map = new Map<
+          string,
+          { code: string; matchName: string; hasX: boolean; hasO: boolean; updated: number }
+        >();
         Object.entries(state).forEach(([_, arr]) => {
           arr.forEach((entry) => {
-            if (entry.code) {
-              codes.push({
-                code: entry.code,
-                role: entry.role ?? "spectator",
-                timestamp: entry.timestamp ?? Date.now()
-              });
-            }
+            if (!entry.code) return;
+            const existing = map.get(entry.code) ?? {
+              code: entry.code,
+              matchName: entry.matchName || entry.code,
+              hasX: false,
+              hasO: false,
+              updated: 0
+            };
+            if (entry.role === "X") existing.hasX = true;
+            if (entry.role === "O") existing.hasO = true;
+            existing.matchName = entry.matchName || existing.matchName;
+            existing.updated = Math.max(existing.updated, entry.timestamp ?? Date.now());
+            map.set(entry.code, existing);
           });
         });
-        setLobbyCodes(
-          codes
-            .filter((c) => Date.now() - c.timestamp < LOBBY_STALE_MS)
-            .sort((a, b) => b.timestamp - a.timestamp)
-            .filter(
-              (item, idx, self) =>
-                idx === self.findIndex((x) => x.code === item.code)
-            )
+        setLobbyEntries(
+          Array.from(map.values())
+            .filter((c) => Date.now() - c.updated < LOBBY_STALE_MS)
+            .sort((a, b) => b.updated - a.updated)
         );
       })
       .subscribe((status) => {
@@ -460,6 +497,15 @@ export default function Home() {
       .on("presence", { event: "sync" }, () => {
         const others = channel.presenceState();
         const othersOnline = Object.keys(others).some((k) => k !== role);
+        let spectators = 0;
+        Object.entries(others).forEach(([key, value]) => {
+          if (key !== role) {
+            value.forEach((entry: any) => {
+              if (entry.role === "spectator") spectators += 1;
+            });
+          }
+        });
+        setSpectatorCount(spectators);
         setRemote((prev) => ({ ...prev, opponentOnline: othersOnline }));
       })
       .subscribe((status) => {
@@ -799,14 +845,6 @@ export default function Home() {
                       className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
                     />
                   </label>
-                  <label className="space-y-1">
-                    Pass O
-                    <input
-                      value={passO}
-                      onChange={(e) => setPassO(e.target.value)}
-                      className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
-                    />
-                  </label>
                 </div>
                 <div className="grid grid-cols-3 gap-2">
                   <button
@@ -856,28 +894,101 @@ export default function Home() {
                     Join as {pendingRole}
                   </button>
                 </div>
-                <div className="flex gap-2 text-xs text-slate-400">
-                  <button
-                    className="px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/60 text-slate-300 hover:border-slate-500/60"
-                    onClick={() => setPendingRole("X")}
-                  >
-                    I am X
-                  </button>
-                  <button
-                    className="px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/60 text-slate-300 hover:border-slate-500/60"
-                    onClick={() => setPendingRole("O")}
-                  >
-                    I am O
-                  </button>
-                  <button
-                    className="px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/60 text-slate-300 hover:border-slate-500/60"
-                    onClick={() => setPendingRole("X")}
-                  >
-                    Spectate (start later)
-                  </button>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <label className="space-y-1">
+                    Join as O — Pass O
+                    <input
+                      value={passO}
+                      onChange={(e) => setPassO(e.target.value)}
+                      className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+                    />
+                  </label>
+                  <div className="flex gap-2 pt-5">
+                    <button
+                      onClick={() => {
+                        if (!remoteCodeInput) return;
+                        const fresh = createInitialState();
+                        fresh.names.O = myName || "Player O";
+                        setGame(fresh);
+                        setMode("online");
+                        setShowSetup(false);
+                        connectRemote(remoteCodeInput, "O");
+                      }}
+                      className="flex-1 px-3 py-2 rounded-lg border border-indigo-400/40 bg-indigo-500/10 text-indigo-100 hover:bg-indigo-500/20"
+                    >
+                      Join as O
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (!remoteCodeInput) return;
+                        const fresh = createInitialState();
+                        setGame(fresh);
+                        setMode("online");
+                        setShowSetup(false);
+                        connectRemote(remoteCodeInput, "spectator");
+                      }}
+                      className="px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/60 text-slate-300 hover:border-slate-500/60"
+                    >
+                      Spectate
+                    </button>
+                  </div>
                 </div>
                 <div className="text-xs text-slate-500">
                   Use the same code and pass to rejoin. Moves from the wrong pass are ignored.
+                </div>
+                <div className="text-sm text-slate-300 pt-2">
+                  Open games
+                  <div className="mt-2 rounded-lg border border-slate-800 bg-slate-900/60 divide-y divide-slate-800">
+                    {lobbyEntries.length === 0 && (
+                      <div className="px-3 py-2 text-xs text-slate-500">No active games</div>
+                    )}
+                    {lobbyEntries.map((entry) => (
+                      <div
+                        key={entry.code}
+                        className="px-3 py-2 text-xs flex items-center justify-between gap-2"
+                      >
+                        <div>
+                          <div className="font-semibold text-slate-100">
+                            {entry.matchName} ({entry.code})
+                          </div>
+                          <div className="text-slate-500">
+                            {entry.hasO ? "In progress" : "Needs O"}
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            className="px-2 py-1 rounded border border-indigo-400/50 bg-indigo-500/10 text-indigo-100 hover:bg-indigo-500/20"
+                            onClick={() => {
+                              setMatchNameInput(entry.matchName);
+                              setRemoteCodeInput(entry.code);
+                              const fresh = createInitialState();
+                              fresh.names.O = myName || "Player O";
+                              setGame(fresh);
+                              setMode("online");
+                              setShowSetup(false);
+                              connectRemote(entry.code, "O");
+                            }}
+                          >
+                            Join as O
+                          </button>
+                          <button
+                            className="px-2 py-1 rounded border border-slate-600 bg-slate-800/60 text-slate-200 hover:border-slate-400/70"
+                            onClick={() => {
+                              setMatchNameInput(entry.matchName);
+                              setRemoteCodeInput(entry.code);
+                              const fresh = createInitialState();
+                              setGame(fresh);
+                              setMode("online");
+                              setShowSetup(false);
+                              connectRemote(entry.code, "spectator");
+                            }}
+                          >
+                            Spectate
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
@@ -905,7 +1016,7 @@ export default function Home() {
             <div className="flex items-center gap-2">
               {inSession && remote.code && (
                 <div className="px-3 py-1 rounded-full border border-indigo-400/40 bg-indigo-500/10 text-indigo-100 text-xs">
-                  {remote.matchName || "Match"} · Code: {remote.code} · Role: {remote.role}
+                  {remote.matchName || "Match"} · Code: {remote.code} · Role: {remote.role} · Spectators: {spectatorCount}
                 </div>
               )}
               <button
