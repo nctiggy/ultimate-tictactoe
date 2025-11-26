@@ -164,22 +164,17 @@ export default function Home() {
     passcodes: { X: "", O: "" },
     matchName: ""
   });
-  const [remoteCodeInput, setRemoteCodeInput] = useState("");
   const [passX, setPassX] = useState("");
   const [passO, setPassO] = useState("");
   const [matchNameInput, setMatchNameInput] = useState("");
   const [showSetup, setShowSetup] = useState(true);
   const [mode, setMode] = useState<"none" | "local" | "online">("none");
-  const [setupStage, setSetupStage] = useState<"choose" | "local" | "online">(
-    "choose"
-  );
   const [myName, setMyName] = useState("Player");
   const [localNames, setLocalNames] = useState({ X: "Player X", O: "Player O" });
   const [localBots, setLocalBots] = useState<{ X: BotLevel; O: BotLevel }>({
     X: "none",
     O: "none"
   });
-  const [pendingRole, setPendingRole] = useState<Player>("X");
   const [spectatorCount, setSpectatorCount] = useState(0);
   const audio = useAudio();
   const aiTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -369,6 +364,48 @@ export default function Home() {
     }
   }, [game]);
 
+  const startLocalGame = () => {
+    const fresh = createInitialState();
+    fresh.names = { ...localNames };
+    fresh.bots = { ...localBots };
+    disconnectRemote(false);
+    setMessage(null);
+    setGame(fresh);
+    setMode("local");
+    setShowSetup(false);
+  };
+
+  const startOnlineGame = () => {
+    const fresh = createInitialState();
+    fresh.names.X = myName || "Player X";
+    fresh.names.O = "Player O";
+    const code = randomCode();
+    const matchName = matchNameInput || code;
+    setMatchNameInput(matchName);
+    disconnectRemote(false);
+    setMessage(null);
+    setGame(fresh);
+    setMode("online");
+    setShowSetup(false);
+    savePrefs({ name: myName, passX });
+    connectRemote(code, "X");
+  };
+
+  const startSpectate = (entry: {
+    code: string;
+    matchName: string;
+    hasX: boolean;
+    hasO: boolean;
+    updated: number;
+  }) => {
+    setMatchNameInput(entry.matchName);
+    const fresh = createInitialState();
+    setGame(fresh);
+    setMode("online");
+    setShowSetup(false);
+    connectRemote(entry.code, "spectator");
+  };
+
   const disconnectRemote = (openSetup = true) => {
     channelRef.current?.unsubscribe();
     channelRef.current = null;
@@ -500,7 +537,7 @@ export default function Home() {
       setMessage("Supabase Realtime not configured. Add env vars.");
       return;
     }
-    disconnectRemote();
+    disconnectRemote(false);
     setGame((prev) => {
       if (!prev) return prev;
       return {
@@ -594,6 +631,14 @@ export default function Home() {
 
     if (
       remote.status === "connected" &&
+      remote.role === "spectator"
+    ) {
+      setMessage("Spectators can claim a side to play.");
+      return;
+    }
+
+    if (
+      remote.status === "connected" &&
       remote.role !== game.currentPlayer &&
       remote.role !== "spectator" &&
       game.bots[game.currentPlayer] === "none"
@@ -629,6 +674,13 @@ export default function Home() {
 
   const handleRpsChoice = (choice: RpsChoice) => {
     if (!game || showSetup || mode === "none") return;
+    if (
+      remote.status === "connected" &&
+      remote.role === "spectator"
+    ) {
+      setMessage("Spectators can claim a side to play.");
+      return;
+    }
     if (
       remote.status === "connected" &&
       remote.role !== game.currentPlayer &&
@@ -710,18 +762,6 @@ export default function Home() {
     }
   };
 
-  const resetGame = () => {
-    const fresh = createInitialState();
-    fresh.bots = { ...localBots };
-    fresh.names = { ...localNames };
-    setGame(fresh);
-    setMessage(null);
-    disconnectRemote();
-    setMode("none");
-    setShowSetup(true);
-    setSetupStage("choose");
-  };
-
   const updateName = (player: "X" | "O", value: string) => {
     setLocalNames((prev) => ({ ...prev, [player]: value || `Player ${player}` }));
     if (!game) return;
@@ -732,10 +772,6 @@ export default function Home() {
     setLocalBots((prev) => ({ ...prev, [player]: level }));
     if (!game) return;
     setGame({ ...game, bots: { ...game.bots, [player]: level } });
-  };
-
-  const updateRemoteRole = (role: RemoteRole) => {
-    setRemote((prev) => ({ ...prev, role, spectator: role === "spectator" }));
   };
 
   if (!game) return <main className="p-8 text-center">Loading…</main>;
@@ -749,282 +785,150 @@ export default function Home() {
     <main className="min-h-screen px-4 py-8">
       {showSetup && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-40 p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-2xl w-full space-y-4 shadow-2xl">
-            <h2 className="text-xl font-bold text-slate-100">New Game</h2>
-            {setupStage === "choose" && (
-              <>
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-5xl w-full space-y-5 shadow-2xl">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-slate-100">Set up a match</h2>
                 <p className="text-sm text-slate-400">
-                  Choose local or online. Settings lock in when you start.
+                  Boards reset when you start. Settings lock after creation.
                 </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <button
-                    className="rounded-xl border border-emerald-400/40 bg-emerald-500/10 text-emerald-100 px-4 py-3 text-left hover:bg-emerald-500/20"
-                    onClick={() => {
-                      disconnectRemote();
-                      setMode("local");
-                      setSetupStage("local");
-                    }}
-                  >
-                    <div className="font-semibold">Local Game</div>
-                    <div className="text-xs text-emerald-200/80">
-                      Hotseat or bots on this device.
-                    </div>
-                  </button>
-                  <button
-                    className="rounded-xl border border-indigo-400/40 bg-indigo-500/10 text-indigo-100 px-4 py-3 text-left hover:bg-indigo-500/20"
-                    onClick={() => {
-                      setMode("online");
-                      setSetupStage("online");
-                    }}
-                  >
-                    <div className="font-semibold">Online Game</div>
-                    <div className="text-xs text-indigo-200/80">
-                      Host or join with a code.
-                    </div>
-                  </button>
-                </div>
-              </>
-            )}
-            {setupStage === "local" && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <label className="text-sm text-slate-300 space-y-1">
-                    Name (X)
-                    <input
-                      value={localNames.X}
-                      onChange={(e) => updateName("X", e.target.value)}
-                      className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/40"
-                    />
-                  </label>
-                  <label className="text-sm text-slate-300 space-y-1">
-                    Name (O)
-                    <input
-                      value={localNames.O}
-                      onChange={(e) => updateName("O", e.target.value)}
-                      className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/40"
-                    />
-                  </label>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <SelectBot
-                    player="X"
-                    botLevel={localBots.X}
-                    onChange={(lvl) => updateBot("X", lvl)}
-                  />
-                  <SelectBot
-                    player="O"
-                    botLevel={localBots.O}
-                    onChange={(lvl) => updateBot("O", lvl)}
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    className="px-4 py-2 rounded-lg border border-emerald-400/40 bg-emerald-500/15 text-emerald-100 hover:bg-emerald-500/25"
-                    onClick={() => {
-                      const fresh = createInitialState();
-                      fresh.names = { ...localNames };
-                      fresh.bots = { ...localBots };
-                      disconnectRemote();
-                      setGame(fresh);
-                      setMode("local");
-                      setShowSetup(false);
-                    }}
-                  >
-                    Start Local Game
-                  </button>
-                  <button
-                    className="px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/60 text-slate-300 hover:border-slate-500/60"
-                    onClick={() => {
-                      setSetupStage("choose");
-                      setMode("none");
-                    }}
-                  >
-                    Back
-                  </button>
-                </div>
               </div>
-            )}
-            {setupStage === "online" && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <label className="text-sm text-slate-300 space-y-1">
-                    Your name
-                    <input
-                      value={myName}
-                      onChange={(e) => setMyName(e.target.value)}
-                      className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
-                    />
-                  </label>
-                  <label className="text-sm text-slate-300 space-y-1">
-                    Match name
-                    <input
-                      value={matchNameInput}
-                      onChange={(e) => setMatchNameInput(e.target.value)}
-                      className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
-                    />
-                  </label>
+              {remote.code && (
+                <div className="px-3 py-1 rounded-full border border-indigo-400/40 bg-indigo-500/10 text-indigo-100 text-xs">
+                  Current code: {remote.code}
                 </div>
-                <div className="grid grid-cols-3 gap-3 text-sm text-slate-300">
-                  <label className="space-y-1">
-                    Code
-                    <input
-                      value={remoteCodeInput}
-                      onChange={(e) => setRemoteCodeInput(e.target.value.toUpperCase())}
-                      className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
-                      placeholder="ABC1"
-                    />
-                  </label>
-                  <label className="space-y-1">
-                    Pass X
-                    <input
-                      value={passX}
-                      onChange={(e) => setPassX(e.target.value)}
-                      className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
-                    />
-                  </label>
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => {
-                      const fresh = createInitialState();
-                      fresh.names.X = myName || "Player X";
-                      fresh.names.O = "Player O";
-                      setGame(fresh);
-                      setMode("online");
-                      setShowSetup(false);
-                      connectRemote(remoteCodeInput || randomCode(), "X");
-                      savePrefs({ name: myName, passX });
-                    }}
-                    className="px-4 py-2 rounded-lg border border-cyan-400/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20"
-                  >
-                    Create Game (You are X)
-                  </button>
-                </div>
-                <div className="grid grid-cols-3 gap-3 text-sm text-slate-300">
-                  <label className="space-y-1 col-span-3">
-                    Join with code (as O)
-                    <div className="grid grid-cols-3 gap-2 mt-1">
-                      <input
-                        value={remoteCodeInput}
-                        onChange={(e) => setRemoteCodeInput(e.target.value.toUpperCase())}
-                        className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
-                        placeholder="ABC1"
-                      />
-                      <input
-                        value={myName}
-                        onChange={(e) => setMyName(e.target.value)}
-                        className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
-                        placeholder="Your name"
-                      />
-                      <input
-                        value={passO}
-                        onChange={(e) => setPassO(e.target.value)}
-                        className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
-                        placeholder="Pass O"
-                      />
-                    </div>
-                  </label>
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => {
-                      if (!remoteCodeInput) return;
-                      const fresh = createInitialState();
-                      fresh.names.O = myName || "Player O";
-                      setGame(fresh);
-                      setMode("online");
-                      setShowSetup(false);
-                      savePrefs({ name: myName, passO });
-                      connectRemote(remoteCodeInput, "O");
-                    }}
-                    className="flex-1 px-3 py-2 rounded-lg border border-indigo-400/40 bg-indigo-500/10 text-indigo-100 hover:bg-indigo-500/20"
-                  >
-                    Join as O
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (!remoteCodeInput) return;
-                      const fresh = createInitialState();
-                      setGame(fresh);
-                      setMode("online");
-                      setShowSetup(false);
-                      connectRemote(remoteCodeInput, "spectator");
-                    }}
-                    className="px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/60 text-slate-300 hover:border-slate-500/60"
-                  >
-                    Spectate
-                  </button>
-                </div>
-                <div className="text-xs text-slate-500">
-                  Use the same code and pass to rejoin. Moves from the wrong pass are ignored.
-                </div>
-                <div className="text-sm text-slate-300 pt-2">
-                  Open games
-                  <div className="mt-2 rounded-lg border border-slate-800 bg-slate-900/60 divide-y divide-slate-800">
-                    {lobbyEntries.length === 0 && (
-                      <div className="px-3 py-2 text-xs text-slate-500">No active games</div>
-                    )}
-                    {lobbyEntries.map((entry) => (
-                      <div
-                        key={entry.code}
-                        className="px-3 py-2 text-xs flex items-center justify-between gap-2"
-                      >
-                        <div>
-                          <div className="font-semibold text-slate-100">
-                            {entry.matchName} ({entry.code})
-                          </div>
-                          <div className="text-slate-500">
-                            {entry.hasO ? "In progress" : "Needs O"}
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <button
-                            className="px-2 py-1 rounded border border-indigo-400/50 bg-indigo-500/10 text-indigo-100 hover:bg-indigo-500/20"
-                            onClick={() => {
-                              setMatchNameInput(entry.matchName);
-                              setRemoteCodeInput(entry.code);
-                              const fresh = createInitialState();
-                              fresh.names.O = myName || "Player O";
-                              setGame(fresh);
-                              setMode("online");
-                              setShowSetup(false);
-                              connectRemote(entry.code, "O");
-                            }}
-                          >
-                            Join as O
-                          </button>
-                          <button
-                            className="px-2 py-1 rounded border border-slate-600 bg-slate-800/60 text-slate-200 hover:border-slate-400/70"
-                            onClick={() => {
-                              setMatchNameInput(entry.matchName);
-                              setRemoteCodeInput(entry.code);
-                              const fresh = createInitialState();
-                              setGame(fresh);
-                              setMode("online");
-                              setShowSetup(false);
-                              connectRemote(entry.code, "spectator");
-                            }}
-                          >
-                            Spectate
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+              )}
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="rounded-xl border border-slate-800/70 p-4 bg-slate-900/50 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-semibold text-slate-100">Create local game</h3>
+                    <p className="text-xs text-slate-500">Hotseat or bots on this device.</p>
                   </div>
+                  <span className="text-[11px] uppercase tracking-wide text-slate-500">Local</span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    className="px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/60 text-slate-300 hover:border-slate-500/60"
-                    onClick={() => {
-                      setSetupStage("choose");
-                      setMode("none");
-                    }}
-                  >
-                    Back
-                  </button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <PlayerCard
+                    player="X"
+                    name={localNames.X}
+                    botLevel={localBots.X}
+                    onNameChange={updateName}
+                    onBotChange={updateBot}
+                  />
+                  <PlayerCard
+                    player="O"
+                    name={localNames.O}
+                    botLevel={localBots.O}
+                    onNameChange={updateName}
+                    onBotChange={updateBot}
+                  />
                 </div>
+                <button
+                  className="w-full px-4 py-2 rounded-lg border border-emerald-400/40 bg-emerald-500/15 text-emerald-100 hover:bg-emerald-500/25"
+                  onClick={startLocalGame}
+                >
+                  Start local game
+                </button>
               </div>
-            )}
+
+              <div className="rounded-xl border border-slate-800/70 p-4 bg-slate-900/50 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-semibold text-slate-100">Create online game</h3>
+                    <p className="text-xs text-slate-500">
+                      You will be X. We generate a shareable code automatically.
+                    </p>
+                  </div>
+                  <span
+                    className={clsx(
+                      "px-2 py-1 rounded-full text-[11px] uppercase tracking-wide border",
+                      realtimeAvailable
+                        ? "border-indigo-400/40 text-indigo-100 bg-indigo-500/10"
+                        : "border-amber-400/40 text-amber-200 bg-amber-500/10"
+                    )}
+                  >
+                    {realtimeAvailable ? "Supabase ready" : "Realtime disabled"}
+                  </span>
+                </div>
+                <label className="text-sm text-slate-300 space-y-1">
+                  Your name
+                  <input
+                    value={myName}
+                    onChange={(e) => setMyName(e.target.value)}
+                    className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+                    placeholder="Player name"
+                  />
+                </label>
+                <label className="text-sm text-slate-300 space-y-1">
+                  Game name
+                  <input
+                    value={matchNameInput}
+                    onChange={(e) => setMatchNameInput(e.target.value)}
+                    className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+                    placeholder="My epic match"
+                  />
+                </label>
+                <label className="text-sm text-slate-300 space-y-1">
+                  Passcode for X
+                  <input
+                    value={passX}
+                    onChange={(e) => setPassX(e.target.value)}
+                    className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+                    placeholder="Required to reclaim X"
+                  />
+                </label>
+                <button
+                  onClick={startOnlineGame}
+                  disabled={!realtimeAvailable}
+                  className="w-full px-4 py-2 rounded-lg border border-cyan-400/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20 disabled:opacity-50"
+                >
+                  Create online match (you are X)
+                </button>
+                <p className="text-xs text-slate-500">
+                  We&apos;ll show the match code after creation. Passcodes save locally so you can
+                  reclaim your seat later.
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-800/70 p-4 bg-slate-900/50 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <h3 className="font-semibold text-slate-100">Online games</h3>
+                  <p className="text-xs text-slate-500">
+                    Click any game to watch. Claim X or O from inside the board with the passcode.
+                  </p>
+                </div>
+                <span className="text-[11px] uppercase tracking-wide text-slate-500">
+                  {lobbyEntries.length} open
+                </span>
+              </div>
+              <div className="overflow-hidden rounded-lg border border-slate-800 divide-y divide-slate-800">
+                {lobbyEntries.length === 0 && (
+                  <div className="px-3 py-3 text-sm text-slate-500">No games live right now.</div>
+                )}
+                {lobbyEntries.map((entry) => (
+                  <button
+                    key={entry.code}
+                    onClick={() => startSpectate(entry)}
+                    className="w-full text-left px-3 py-3 hover:bg-slate-800/60 grid grid-cols-[2fr_1fr_1fr] gap-2 items-center"
+                  >
+                    <div>
+                      <div className="font-semibold text-slate-100">{entry.matchName}</div>
+                      <div className="text-[11px] text-slate-500 font-mono">{entry.code}</div>
+                    </div>
+                    <div className="text-sm text-slate-300">
+                      {entry.hasO ? "In progress" : "Needs O"}
+                    </div>
+                    <div className="text-right text-xs text-slate-500">
+                      {new Date(entry.updated).toLocaleTimeString()}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -1066,8 +970,8 @@ export default function Home() {
                     if (!ok) return;
                     disconnectRemote();
                   }
+                  setGame(createInitialState());
                   setShowSetup(true);
-                  setSetupStage("choose");
                   setMode("none");
                   setMessage(null);
                 }}
@@ -1104,14 +1008,6 @@ export default function Home() {
                 {message}
               </span>
             )}
-            {inSession && (
-              <button
-                onClick={() => setShowSetup((s) => !s)}
-                className="px-3 py-1 rounded-lg border border-slate-700 bg-slate-800/60 text-xs text-slate-200 hover:border-slate-500/60"
-              >
-                {showSetup ? "Hide setup" : "Show setup"}
-              </button>
-            )}
           </div>
 
           {game.macroWinner && (
@@ -1126,7 +1022,7 @@ export default function Home() {
             </div>
           )}
 
-          <div className="mt-6 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-6">
+          <div className="mt-6">
             <div className="bg-slate-900/40 rounded-2xl p-4 border border-slate-800/60 shadow-glow">
               <BigBoard
                 game={game}
@@ -1134,61 +1030,15 @@ export default function Home() {
                 onCellClick={handleCellClick}
               />
             </div>
-            {showSetup && (
-              <aside className="bg-slate-900/30 rounded-2xl border border-slate-800/60 p-4 flex flex-col gap-4">
-                <h2 className="font-semibold text-lg">Match Setup</h2>
-                {mode === "local" && (
-                  <>
-                    <PlayerCard
-                      player="X"
-                      name={game.names.X}
-                      botLevel={game.bots.X}
-                      onNameChange={updateName}
-                      onBotChange={updateBot}
-                    />
-                    <PlayerCard
-                      player="O"
-                      name={game.names.O}
-                      botLevel={game.bots.O}
-                      onNameChange={updateName}
-                      onBotChange={updateBot}
-                    />
-                    <p className="text-xs text-slate-500">
-                      Leaving will destroy this local game.
-                    </p>
-                  </>
-                )}
-                {mode === "online" && (
-                  <RemoteCard
-                    remote={remote}
-                    codeInput={remoteCodeInput}
-                    matchNameInput={matchNameInput}
-                    passX={passX}
-                    passO={passO}
-                    onCodeChange={setRemoteCodeInput}
-                    onMatchNameChange={setMatchNameInput}
-                    onPassXChange={setPassX}
-                    onPassOChange={setPassO}
-                    onConnect={connectRemote}
-                    onDisconnect={disconnectRemote}
-                    onRoleChange={updateRemoteRole}
-                    realtimeAvailable={realtimeAvailable}
-                    lobbies={lobbyEntries}
-                  />
-                )}
-                <div className="text-sm text-slate-400 space-y-2">
-                  <p>
-                    Last move decides the next micro-board. If that board is
-                    already closed, you can play anywhere.
-                  </p>
-                  <p>
-                    Cat&apos;s games trigger Rock Paper Scissors Lizard Spock to
-                    claim the square. Ties go again.
-                  </p>
-                  <p className="text-slate-500">State saves locally via cookies.</p>
-                </div>
-              </aside>
-            )}
+            <div className="mt-4 text-sm text-slate-400 space-y-1">
+              <p>
+                Last move decides the next micro-board. If that board is already closed, you can play anywhere.
+              </p>
+              <p>
+                Cat&apos;s games trigger Rock Paper Scissors Lizard Spock to claim the square. Ties go again.
+              </p>
+              <p className="text-slate-500">State saves locally via cookies.</p>
+            </div>
           </div>
         </section>
       </div>
@@ -1345,33 +1195,7 @@ function SelectBot({
   botLevel: BotLevel;
   onChange: (level: BotLevel) => void;
 }) {
-  return (
-    <div className="space-y-1 text-sm text-slate-300">
-      <div className="font-semibold">Bot for {player}</div>
-      <div className="flex gap-2 text-xs">
-        {(["none", "easy", "smart", "hard"] as BotLevel[]).map((level) => (
-          <button
-            key={level}
-            onClick={() => onChange(level)}
-            className={clsx(
-              "px-3 py-2 rounded-lg border flex-1 transition",
-              botLevel === level
-                ? "border-emerald-400/50 bg-emerald-500/15 text-emerald-100"
-                : "border-slate-700/70 bg-slate-800/60 text-slate-300 hover:border-slate-500/60"
-            )}
-          >
-            {level === "none"
-              ? "Human"
-              : level === "easy"
-              ? "AI: Easy"
-              : level === "smart"
-              ? "AI: Smart"
-              : "AI: Hard"}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
+  return null;
 }
 
 function RpsOverlay({
@@ -1500,190 +1324,5 @@ function RemoteCard({
   realtimeAvailable: boolean;
   lobbies: Array<{ code: string; matchName: string; hasX: boolean; hasO: boolean; updated: number }>;
 }) {
-  const handleHost = (role: Player) => {
-    onRoleChange(role);
-    const code = (codeInput || randomCode()).toUpperCase();
-    onCodeChange(code);
-    onConnect(code, role);
-  };
-
-  const handleJoin = (role: Player) => {
-    const code = codeInput.trim().toUpperCase();
-    if (!code) return;
-    onRoleChange(role);
-    onConnect(code, role);
-  };
-
-  return (
-    <div className="rounded-xl border border-slate-800/70 p-3 bg-slate-900/50 space-y-3">
-      <div className="flex items-center justify-between">
-        <h3 className="font-semibold text-sm">Remote play (Supabase)</h3>
-        <span
-          className={clsx(
-            "px-2 py-1 rounded-full text-[11px] uppercase tracking-wide border",
-            remote.status === "connected"
-              ? "border-emerald-400/40 text-emerald-200 bg-emerald-500/10"
-              : remote.status === "connecting"
-              ? "border-amber-400/40 text-amber-200 bg-amber-500/10"
-              : "border-slate-600 text-slate-300 bg-slate-800/60"
-          )}
-        >
-          {remote.status}
-        </span>
-      </div>
-      {!realtimeAvailable && (
-        <p className="text-xs text-amber-300">
-          Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to enable
-          remote games.
-        </p>
-      )}
-      <div className="flex gap-2">
-        <input
-          value={codeInput}
-          onChange={(e) => onCodeChange(e.target.value.toUpperCase())}
-          className="flex-1 rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/40"
-          placeholder="Match code"
-        />
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs text-slate-400">
-        <label className="space-y-1">
-          <span>Match name</span>
-          <input
-            value={matchNameInput}
-            onChange={(e) => onMatchNameChange(e.target.value)}
-            className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/40"
-            placeholder="Optional"
-          />
-        </label>
-        <label className="space-y-1">
-          <span>Passcode for X</span>
-          <input
-            value={passX}
-            onChange={(e) => onPassXChange(e.target.value)}
-            className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/40"
-            placeholder="Optional"
-          />
-        </label>
-        <label className="space-y-1">
-          <span>Passcode for O</span>
-          <input
-            value={passO}
-            onChange={(e) => onPassOChange(e.target.value)}
-            className="w-full rounded-lg bg-slate-800/60 border border-slate-700/80 px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/40"
-            placeholder="Optional"
-          />
-        </label>
-      </div>
-      <div className="flex gap-2">
-        <button
-          onClick={() => handleHost("X")}
-          disabled={!realtimeAvailable}
-          className="flex-1 px-3 py-2 rounded-lg border border-cyan-400/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20 disabled:opacity-40"
-        >
-          Host as X
-        </button>
-        <button
-          onClick={() => handleHost("O")}
-          disabled={!realtimeAvailable}
-          className="flex-1 px-3 py-2 rounded-lg border border-cyan-400/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20 disabled:opacity-40"
-        >
-          Host as O
-        </button>
-        <button
-          onClick={onDisconnect}
-          disabled={remote.status === "idle"}
-          className="px-3 py-2 rounded-lg border border-slate-600 bg-slate-800/60 text-slate-200 hover:bg-slate-700/60 disabled:opacity-40"
-        >
-          Leave
-        </button>
-      </div>
-      <div className="flex gap-2">
-        <button
-          onClick={() => handleJoin("X")}
-          disabled={!realtimeAvailable || !codeInput}
-          className="flex-1 px-3 py-2 rounded-lg border border-indigo-400/40 bg-indigo-500/10 text-indigo-100 hover:bg-indigo-500/20 disabled:opacity-40"
-        >
-          Join as X
-        </button>
-        <button
-          onClick={() => handleJoin("O")}
-          disabled={!realtimeAvailable || !codeInput}
-          className="flex-1 px-3 py-2 rounded-lg border border-indigo-400/40 bg-indigo-500/10 text-indigo-100 hover:bg-indigo-500/20 disabled:opacity-40"
-        >
-          Join as O
-        </button>
-        <button
-          onClick={() => onConnect(codeInput.trim().toUpperCase(), "spectator")}
-          disabled={!realtimeAvailable || !codeInput}
-          className="px-3 py-2 rounded-lg border border-slate-600 bg-slate-800/60 text-slate-200 hover:bg-slate-700/60 disabled:opacity-40"
-        >
-          Spectate
-        </button>
-      </div>
-      <div className="text-xs text-slate-400 space-y-1">
-        <p>Share the code to play across devices.</p>
-        <p>
-          Opponent:{" "}
-          <span
-            className={
-              remote.opponentOnline ? "text-emerald-200" : "text-slate-500"
-            }
-          >
-            {remote.opponentOnline ? "online" : "waiting"}
-          </span>
-        </p>
-        {remote.code && (
-          <p className="text-slate-300">
-            Current code: <span className="font-mono">{remote.code}</span>
-          </p>
-        )}
-        {remote.lastEvent && (
-          <p className="text-slate-500">Last sync: {remote.lastEvent}</p>
-        )}
-        <div className="mt-2 space-y-2">
-          <p className="text-slate-300">Open lobbies:</p>
-          {lobbies.length === 0 && (
-            <p className="text-slate-500">No lobbies yet. Host or join one.</p>
-          )}
-          {lobbies.slice(0, 5).map((lobby) => (
-            <div
-              key={lobby.code}
-              className="flex items-center justify-between gap-2 rounded-lg border border-slate-700/60 bg-slate-800/50 px-3 py-2"
-            >
-              <div>
-                <div className="font-semibold text-slate-100">
-                  {lobby.matchName} ({lobby.code})
-                </div>
-                <div className="text-[11px] text-slate-500">
-                  {lobby.hasO ? "In progress" : "Needs O"}
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => {
-                    onCodeChange(lobby.code);
-                    onConnect(lobby.code, "spectator");
-                  }}
-                  className="px-2 py-1 text-xs rounded-md border border-slate-600 bg-slate-900 hover:border-slate-400/70"
-                >
-                  Spectate
-                </button>
-                <button
-                  onClick={() => {
-                    onCodeChange(lobby.code);
-                    onConnect(lobby.code, "O");
-                  }}
-                  className="px-2 py-1 text-xs rounded-md border border-emerald-400/50 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/20"
-                  disabled={lobby.hasO}
-                  title={lobby.hasO ? "O already taken" : "Join as O"}
-                >
-                  Join O
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
+  return null;
 }
