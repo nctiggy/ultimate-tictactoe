@@ -26,10 +26,11 @@ const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 type RemoteStatus = "idle" | "connecting" | "connected";
 type RemoteState = {
   code: string;
-  role: "X" | "O";
+  role: RemoteRole;
   status: RemoteStatus;
   opponentOnline: boolean;
   lastEvent?: string;
+  spectator: boolean;
 };
 
 type RemotePayload =
@@ -41,6 +42,8 @@ type RemoteOutbound =
   | { kind: "move"; board: number; cell: number; player: Player }
   | { kind: "rps"; choice: RpsChoice; player: Player }
   | { kind: "state"; state: GameState };
+
+type RemoteRole = Player | "spectator";
 
 const RPS_CHOICES: Array<{ key: RpsChoice; label: string; emoji: string }> = [
   { key: "rock", label: "Rock", emoji: "🪨" },
@@ -119,12 +122,19 @@ export default function Home() {
     code: "",
     role: "X",
     status: "idle",
-    opponentOnline: false
+    opponentOnline: false,
+    spectator: false
   });
   const [remoteCodeInput, setRemoteCodeInput] = useState("");
+  const [showSetup, setShowSetup] = useState(true);
   const audio = useAudio();
   const aiTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
+  const lobbyChannelRef = useRef<RealtimeChannel | null>(null);
+  const clientIdRef = useRef<string>(Math.random().toString(36).slice(2, 10));
+  const [lobbyCodes, setLobbyCodes] = useState<
+    Array<{ code: string; role: RemoteRole; timestamp: number }>
+  >([]);
 
   useEffect(() => {
     const saved = readCookie(COOKIE_KEY);
@@ -134,6 +144,77 @@ export default function Home() {
   useEffect(() => {
     if (game) persistState(game);
   }, [game]);
+
+  useEffect(() => {
+    if (!supabase) return;
+    const lobby = supabase.channel("utt-lobby", {
+      config: { presence: { key: clientIdRef.current } }
+    });
+    lobbyChannelRef.current = lobby;
+
+    lobby
+      .on("presence", { event: "sync" }, () => {
+        const state = lobby.presenceState() as Record<
+          string,
+          Array<{ code?: string; role?: RemoteRole; timestamp?: number }>
+        >;
+        const codes: Array<{ code: string; role: RemoteRole; timestamp: number }> = [];
+        Object.entries(state).forEach(([_, arr]) => {
+          arr.forEach((entry) => {
+            if (entry.code) {
+              codes.push({
+                code: entry.code,
+                role: entry.role as RemoteRole,
+                timestamp: entry.timestamp ?? Date.now()
+              });
+            }
+          });
+        });
+        setLobbyCodes(
+          codes
+            .sort((a, b) => b.timestamp - a.timestamp)
+            .filter(
+              (item, idx, self) =>
+                idx === self.findIndex((x) => x.code === item.code)
+            )
+        );
+      })
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") {
+          lobby
+            .track({
+              lobby: true,
+              timestamp: Date.now()
+            })
+            .catch(() => {});
+        }
+      });
+
+    return () => {
+      lobby.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    const lobby = lobbyChannelRef.current;
+    if (!lobby) return;
+    if (remote.status === "connected" && remote.code) {
+      lobby
+        .track({
+          code: remote.code,
+          role: remote.role,
+          timestamp: Date.now()
+        })
+        .catch(() => {});
+    } else {
+      lobby
+        .track({
+          lobby: true,
+          timestamp: Date.now()
+        })
+        .catch(() => {});
+    }
+  }, [remote.status, remote.code, remote.role]);
 
   useEffect(() => {
     if (!game || game.macroWinner) return;
@@ -177,13 +258,14 @@ export default function Home() {
       ...prev,
       status: "idle",
       opponentOnline: false,
-      lastEvent: undefined
+      lastEvent: undefined,
+      spectator: false
     }));
   };
 
   const handleRemotePayload = (payload: RemotePayload) => {
     if (!game) return;
-    if (payload.from === remote.role) return;
+    if (remote.role !== "spectator" && payload.from === remote.role) return;
     setRemote((prev) => ({ ...prev, lastEvent: `${payload.kind}` }));
 
     if (payload.kind === "move") {
@@ -208,7 +290,7 @@ export default function Home() {
 
     if (payload.kind === "state") {
       setGame(payload.state);
-      setMessage(null);
+      setMessage("Synced remote state.");
     }
   };
 
@@ -221,7 +303,21 @@ export default function Home() {
     });
   };
 
-  const connectRemote = (code: string, role: Player) => {
+  const sendRemoteStateSnapshot = (channel?: RealtimeChannel) => {
+    if (!game) return;
+    const target = channel ?? channelRef.current;
+    if (!target) return;
+    target.send({
+      type: "broadcast",
+      event: "game",
+      payload: { kind: "state", state: game, from: remote.role }
+    });
+    setRemote((prev) => ({ ...prev, lastEvent: "state" }));
+    setMessage("Shared full state with opponent.");
+  };
+
+  const connectRemote = (code: string, role: RemoteRole) => {
+    setShowSetup(false);
     if (!supabase) {
       setMessage("Supabase Realtime not configured. Add env vars.");
       return;
@@ -231,7 +327,8 @@ export default function Home() {
       code,
       role,
       status: "connecting",
-      opponentOnline: false
+      opponentOnline: false,
+      spectator: role === "spectator"
     });
 
     const channel = supabase.channel(`utt-${code}`, {
@@ -250,11 +347,16 @@ export default function Home() {
       })
       .subscribe((status) => {
         if (status === "SUBSCRIBED") {
-          channel
-            .track({ role, name: game?.names[role] ?? role })
-            .catch(() => {});
+          if (role !== "spectator") {
+            channel
+              .track({ role, name: game?.names[role] ?? role })
+              .catch(() => {});
+          } else {
+            channel.track({ role, name: "spectator" }).catch(() => {});
+          }
           setRemote((prev) => ({ ...prev, status: "connected" }));
           setMessage(`Connected to match ${code}`);
+          sendRemoteStateSnapshot(channel);
         }
       });
   };
@@ -276,6 +378,7 @@ export default function Home() {
     if (
       remote.status === "connected" &&
       remote.role !== game.currentPlayer &&
+      remote.role !== "spectator" &&
       game.bots[game.currentPlayer] === "none"
     ) {
       setMessage("Waiting for opponent to move.");
@@ -292,7 +395,11 @@ export default function Home() {
       if (result.state.pendingRpsBoard !== null) audio.rps();
       else audio.click();
       if (result.state.macroWinner) audio.win();
-      if (remote.status === "connected" && game.bots[actor] === "none") {
+      if (
+        remote.status === "connected" &&
+        game.bots[actor] === "none" &&
+        remote.role === actor
+      ) {
         sendRemoteEvent({
           kind: "move",
           board: boardIndex,
@@ -308,6 +415,7 @@ export default function Home() {
     if (
       remote.status === "connected" &&
       remote.role !== game.currentPlayer &&
+      remote.role !== "spectator" &&
       game.bots[game.currentPlayer] === "none"
     ) {
       setMessage("Waiting for opponent to pick.");
@@ -318,11 +426,15 @@ export default function Home() {
     const result = submitRpsChoice(game, game.currentPlayer, choice);
     setGame(result.state);
 
-    if (remote.status === "connected" && game.bots[actor] === "none") {
-      sendRemoteEvent({
-        kind: "rps",
-        choice,
-        player: actor
+      if (
+        remote.status === "connected" &&
+        game.bots[actor] === "none" &&
+        remote.role === actor
+      ) {
+        sendRemoteEvent({
+          kind: "rps",
+          choice,
+          player: actor
       });
     }
 
@@ -368,8 +480,8 @@ export default function Home() {
     setGame({ ...game, bots: { ...game.bots, [player]: level } });
   };
 
-  const updateRemoteRole = (role: Player) => {
-    setRemote((prev) => ({ ...prev, role }));
+  const updateRemoteRole = (role: RemoteRole) => {
+    setRemote((prev) => ({ ...prev, role, spectator: role === "spectator" }));
   };
 
   if (!game) return <main className="p-8 text-center">Loading…</main>;
@@ -377,6 +489,7 @@ export default function Home() {
   const allowedBoards = game
     ? Array.from(new Set(availableMoves(game).map((m) => m.board)))
     : [];
+  const inSession = remote.status === "connected";
 
   return (
     <main className="min-h-screen px-4 py-8">
@@ -416,6 +529,14 @@ export default function Home() {
                 {message}
               </span>
             )}
+            {inSession && (
+              <button
+                onClick={() => setShowSetup((s) => !s)}
+                className="px-3 py-1 rounded-lg border border-slate-700 bg-slate-800/60 text-xs text-slate-200 hover:border-slate-500/60"
+              >
+                {showSetup ? "Hide setup" : "Show setup"}
+              </button>
+            )}
           </div>
 
           {game.macroWinner && (
@@ -438,43 +559,46 @@ export default function Home() {
                 onCellClick={handleCellClick}
               />
             </div>
-            <aside className="bg-slate-900/30 rounded-2xl border border-slate-800/60 p-4 flex flex-col gap-4">
-              <h2 className="font-semibold text-lg">Match Setup</h2>
-              <PlayerCard
-                player="X"
-                name={game.names.X}
-                botLevel={game.bots.X}
-                onNameChange={updateName}
-                onBotChange={updateBot}
-              />
-              <PlayerCard
-                player="O"
-                name={game.names.O}
-                botLevel={game.bots.O}
-                onNameChange={updateName}
-                onBotChange={updateBot}
-              />
-              <RemoteCard
-                remote={remote}
-                codeInput={remoteCodeInput}
-                onCodeChange={setRemoteCodeInput}
-                onConnect={connectRemote}
-                onDisconnect={disconnectRemote}
-                onRoleChange={updateRemoteRole}
-                realtimeAvailable={realtimeAvailable}
-              />
-              <div className="text-sm text-slate-400 space-y-2">
-                <p>
-                  Last move decides the next micro-board. If that board is
-                  already closed, you can play anywhere.
-                </p>
-                <p>
-                  Cat&apos;s games trigger Rock Paper Scissors Lizard Spock to
-                  claim the square. Ties go again.
-                </p>
-                <p className="text-slate-500">State saves locally via cookies.</p>
-              </div>
-            </aside>
+            {showSetup && (
+              <aside className="bg-slate-900/30 rounded-2xl border border-slate-800/60 p-4 flex flex-col gap-4">
+                <h2 className="font-semibold text-lg">Match Setup</h2>
+                <PlayerCard
+                  player="X"
+                  name={game.names.X}
+                  botLevel={game.bots.X}
+                  onNameChange={updateName}
+                  onBotChange={updateBot}
+                />
+                <PlayerCard
+                  player="O"
+                  name={game.names.O}
+                  botLevel={game.bots.O}
+                  onNameChange={updateName}
+                  onBotChange={updateBot}
+                />
+                <RemoteCard
+                  remote={remote}
+                  codeInput={remoteCodeInput}
+                  onCodeChange={setRemoteCodeInput}
+                  onConnect={connectRemote}
+                  onDisconnect={disconnectRemote}
+                  onRoleChange={updateRemoteRole}
+                  realtimeAvailable={realtimeAvailable}
+                  lobbies={lobbyCodes}
+                />
+                <div className="text-sm text-slate-400 space-y-2">
+                  <p>
+                    Last move decides the next micro-board. If that board is
+                    already closed, you can play anywhere.
+                  </p>
+                  <p>
+                    Cat&apos;s games trigger Rock Paper Scissors Lizard Spock to
+                    claim the square. Ties go again.
+                  </p>
+                  <p className="text-slate-500">State saves locally via cookies.</p>
+                </div>
+              </aside>
+            )}
           </div>
         </section>
       </div>
@@ -666,15 +790,17 @@ function RemoteCard({
   onConnect,
   onDisconnect,
   onRoleChange,
-  realtimeAvailable
+  realtimeAvailable,
+  lobbies
 }: {
   remote: RemoteState;
   codeInput: string;
   onCodeChange: (code: string) => void;
-  onConnect: (code: string, role: Player) => void;
+  onConnect: (code: string, role: RemoteRole) => void;
   onDisconnect: () => void;
-  onRoleChange: (role: Player) => void;
+  onRoleChange: (role: RemoteRole) => void;
   realtimeAvailable: boolean;
+  lobbies: Array<{ code: string; role: RemoteRole; timestamp: number }>;
 }) {
   const handleHost = () => {
     const code = (codeInput || randomCode()).toUpperCase();
@@ -720,11 +846,12 @@ function RemoteCard({
         />
         <select
           value={remote.role}
-          onChange={(e) => onRoleChange(e.target.value as Player)}
+          onChange={(e) => onRoleChange(e.target.value as RemoteRole)}
           className="rounded-lg bg-slate-800/60 border border-slate-700/80 px-2 text-sm"
         >
           <option value="X">Play as X</option>
           <option value="O">Play as O</option>
+          <option value="spectator">Spectate</option>
         </select>
       </div>
       <div className="flex gap-2">
@@ -770,6 +897,45 @@ function RemoteCard({
         {remote.lastEvent && (
           <p className="text-slate-500">Last sync: {remote.lastEvent}</p>
         )}
+        <div className="mt-2 space-y-2">
+          <p className="text-slate-300">Open lobbies:</p>
+          {lobbies.length === 0 && (
+            <p className="text-slate-500">No lobbies yet. Host or join one.</p>
+          )}
+          {lobbies.slice(0, 5).map((lobby) => (
+            <div
+              key={lobby.code}
+              className="flex items-center justify-between gap-2 rounded-lg border border-slate-700/60 bg-slate-800/50 px-3 py-2"
+            >
+              <div>
+                <div className="font-mono text-sm text-slate-100">{lobby.code}</div>
+                <div className="text-[11px] text-slate-500">
+                  host: {lobby.role === "spectator" ? "unknown" : lobby.role}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    onCodeChange(lobby.code);
+                    onConnect(lobby.code, "spectator");
+                  }}
+                  className="px-2 py-1 text-xs rounded-md border border-slate-600 bg-slate-900 hover:border-slate-400/70"
+                >
+                  Spectate
+                </button>
+                <button
+                  onClick={() => {
+                    onCodeChange(lobby.code);
+                    onConnect(lobby.code, remote.role);
+                  }}
+                  className="px-2 py-1 text-xs rounded-md border border-cyan-400/50 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20"
+                >
+                  Join
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
