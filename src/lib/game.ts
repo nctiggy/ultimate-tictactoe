@@ -289,6 +289,31 @@ export function submitRpsChoice(
       );
       macroWinner = determineMacroWinner(updatedBoards);
 
+      if (
+        !macroWinner &&
+        pendingRpsBoard === null &&
+        updatedBoards.every((b) => b.winner !== null)
+      ) {
+        return {
+          state: {
+            ...state,
+            boards: updatedBoards,
+            pendingRpsBoard,
+            macroWinner,
+            currentPlayer: nextTurn,
+            pendingFinalRps: true,
+            finalRps:
+              state.finalRps ?? {
+                picks: {},
+                lastOutcome: undefined,
+                score: { X: 0, O: 0 },
+                rounds: 0
+              }
+          },
+          resolvedRps
+        };
+      }
+
       return {
         state: {
           ...state,
@@ -307,6 +332,31 @@ export function submitRpsChoice(
   const updatedBoards = state.boards.map((b, idx) =>
     idx === boardIndex ? updatedBoard : b
   );
+
+  if (
+    !macroWinner &&
+    pendingRpsBoard === null &&
+    updatedBoards.every((b) => b.winner !== null)
+  ) {
+    return {
+      state: {
+        ...state,
+        boards: updatedBoards,
+        pendingRpsBoard,
+        macroWinner,
+        currentPlayer,
+        pendingFinalRps: true,
+        finalRps:
+          state.finalRps ?? {
+            picks: {},
+            lastOutcome: undefined,
+            score: { X: 0, O: 0 },
+            rounds: 0
+          }
+      },
+      resolvedRps
+    };
+  }
 
   return {
     state: {
