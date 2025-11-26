@@ -350,6 +350,13 @@ export default function Home() {
       return;
     }
     disconnectRemote();
+    setGame((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        bots: { X: "none", O: "none" }
+      };
+    });
     setRemote({
       code,
       role,
@@ -850,16 +857,18 @@ function RemoteCard({
   realtimeAvailable: boolean;
   lobbies: Array<{ code: string; role: RemoteRole; timestamp: number }>;
 }) {
-  const handleHost = () => {
+  const handleHost = (role: Player) => {
+    onRoleChange(role);
     const code = (codeInput || randomCode()).toUpperCase();
     onCodeChange(code);
-    onConnect(code, remote.role);
+    onConnect(code, role);
   };
 
-  const handleJoin = () => {
+  const handleJoin = (role: Player) => {
     const code = codeInput.trim().toUpperCase();
     if (!code) return;
-    onConnect(code, remote.role);
+    onRoleChange(role);
+    onConnect(code, role);
   };
 
   return (
@@ -892,30 +901,21 @@ function RemoteCard({
           className="flex-1 rounded-lg bg-slate-800/60 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/40"
           placeholder="Match code"
         />
-        <select
-          value={remote.role}
-          onChange={(e) => onRoleChange(e.target.value as RemoteRole)}
-          className="rounded-lg bg-slate-800/60 border border-slate-700/80 px-2 text-sm"
-        >
-          <option value="X">Play as X</option>
-          <option value="O">Play as O</option>
-          <option value="spectator">Spectate</option>
-        </select>
       </div>
       <div className="flex gap-2">
         <button
-          onClick={handleHost}
+          onClick={() => handleHost("X")}
           disabled={!realtimeAvailable}
           className="flex-1 px-3 py-2 rounded-lg border border-cyan-400/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20 disabled:opacity-40"
         >
-          Host
+          Host as X
         </button>
         <button
-          onClick={handleJoin}
-          disabled={!realtimeAvailable || !codeInput}
-          className="flex-1 px-3 py-2 rounded-lg border border-indigo-400/40 bg-indigo-500/10 text-indigo-100 hover:bg-indigo-500/20 disabled:opacity-40"
+          onClick={() => handleHost("O")}
+          disabled={!realtimeAvailable}
+          className="flex-1 px-3 py-2 rounded-lg border border-cyan-400/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20 disabled:opacity-40"
         >
-          Join
+          Host as O
         </button>
         <button
           onClick={onDisconnect}
@@ -923,6 +923,29 @@ function RemoteCard({
           className="px-3 py-2 rounded-lg border border-slate-600 bg-slate-800/60 text-slate-200 hover:bg-slate-700/60 disabled:opacity-40"
         >
           Leave
+        </button>
+      </div>
+      <div className="flex gap-2">
+        <button
+          onClick={() => handleJoin("X")}
+          disabled={!realtimeAvailable || !codeInput}
+          className="flex-1 px-3 py-2 rounded-lg border border-indigo-400/40 bg-indigo-500/10 text-indigo-100 hover:bg-indigo-500/20 disabled:opacity-40"
+        >
+          Join as X
+        </button>
+        <button
+          onClick={() => handleJoin("O")}
+          disabled={!realtimeAvailable || !codeInput}
+          className="flex-1 px-3 py-2 rounded-lg border border-indigo-400/40 bg-indigo-500/10 text-indigo-100 hover:bg-indigo-500/20 disabled:opacity-40"
+        >
+          Join as O
+        </button>
+        <button
+          onClick={() => onConnect(codeInput.trim().toUpperCase(), "spectator")}
+          disabled={!realtimeAvailable || !codeInput}
+          className="px-3 py-2 rounded-lg border border-slate-600 bg-slate-800/60 text-slate-200 hover:bg-slate-700/60 disabled:opacity-40"
+        >
+          Spectate
         </button>
       </div>
       <div className="text-xs text-slate-400 space-y-1">
@@ -974,11 +997,20 @@ function RemoteCard({
                 <button
                   onClick={() => {
                     onCodeChange(lobby.code);
-                    onConnect(lobby.code, remote.role);
+                    onConnect(lobby.code, "X");
                   }}
                   className="px-2 py-1 text-xs rounded-md border border-cyan-400/50 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20"
                 >
-                  Join
+                  Join X
+                </button>
+                <button
+                  onClick={() => {
+                    onCodeChange(lobby.code);
+                    onConnect(lobby.code, "O");
+                  }}
+                  className="px-2 py-1 text-xs rounded-md border border-emerald-400/50 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/20"
+                >
+                  Join O
                 </button>
               </div>
             </div>
