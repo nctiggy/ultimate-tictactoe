@@ -369,7 +369,7 @@ export default function Home() {
     }
   }, [game]);
 
-  const disconnectRemote = () => {
+  const disconnectRemote = (openSetup = true) => {
     channelRef.current?.unsubscribe();
     channelRef.current = null;
     setRemote((prev) => ({
@@ -381,7 +381,38 @@ export default function Home() {
       matchName: "",
       passcodes: { X: passX, O: passO }
     }));
-    setShowSetup(true);
+    if (openSetup) setShowSetup(true);
+  };
+
+  const claimRole = (role: Player) => {
+    if (!remote.code) {
+      setMessage("No active match to claim.");
+      return;
+    }
+    const pass = window.prompt(`Enter passcode for ${role}`);
+    if (!pass) {
+      setMessage("Passcode required to claim.");
+      return;
+    }
+    if (
+      remote.passcodes[role] &&
+      remote.passcodes[role] !== pass
+    ) {
+      setMessage("Passcode incorrect.");
+      return;
+    }
+    if (!remote.passcodes[role]) {
+      setRemote((prev) => ({
+        ...prev,
+        passcodes: { ...prev.passcodes, [role]: pass }
+      }));
+      if (role === "X") setPassX(pass);
+      if (role === "O") setPassO(pass);
+      savePrefs({ name: myName, passX: role === "X" ? pass : passX, passO: role === "O" ? pass : passO });
+    }
+    disconnectRemote(false);
+    setMatchNameInput(remote.matchName);
+    connectRemote(remote.code, role);
   };
 
   const handleRemotePayload = (payload: RemotePayload) => {
@@ -397,10 +428,16 @@ export default function Home() {
           return;
         }
       } else if (payload.pass) {
+        const updatedPasses = { ...remote.passcodes, [payload.player]: payload.pass as string };
         setRemote((prev) => ({
           ...prev,
-          passcodes: { ...prev.passcodes, [payload.player]: payload.pass as string }
+          passcodes: updatedPasses
         }));
+        savePrefs({
+          name: myName,
+          passX: updatedPasses.X,
+          passO: updatedPasses.O
+        });
       }
     }
 
@@ -482,7 +519,7 @@ export default function Home() {
       opponentOnline: false,
       spectator: role === "spectator",
       passcodes,
-      matchName: matchNameInput || code
+      matchName: matchNameInput || remote.matchName || code
     });
 
     const channel = supabase.channel(`utt-${code}`, {
@@ -1002,6 +1039,22 @@ export default function Home() {
               {inSession && remote.code && (
                 <div className="px-3 py-1 rounded-full border border-indigo-400/40 bg-indigo-500/10 text-indigo-100 text-xs">
                   {remote.matchName || "Match"} · Code: {remote.code} · Role: {remote.role} · Spectators: {spectatorCount}
+                </div>
+              )}
+              {inSession && remote.role === "spectator" && (
+                <div className="flex gap-2">
+                  <button
+                    className="px-3 py-2 rounded-lg border border-cyan-400/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20 text-xs"
+                    onClick={() => claimRole("X")}
+                  >
+                    Claim X
+                  </button>
+                  <button
+                    className="px-3 py-2 rounded-lg border border-emerald-400/40 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/20 text-xs"
+                    onClick={() => claimRole("O")}
+                  >
+                    Claim O
+                  </button>
                 </div>
               )}
               <button
