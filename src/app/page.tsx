@@ -24,7 +24,7 @@ import { supabase } from "../lib/supabaseClient";
 const COOKIE_KEY = "utt_state_v1";
 const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 const LOBBY_STALE_MS = 10 * 60 * 1000; // 10 minutes
-const HIDE_DELETED_MS = 90_000;
+const HIDE_DELETED_MS = 24 * 60 * 60 * 1000; // hide deleted codes locally for 24h
 
 type RemoteStatus = "idle" | "connecting" | "connected";
 type RemoteState = {
