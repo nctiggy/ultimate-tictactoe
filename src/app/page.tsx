@@ -149,6 +149,7 @@ export default function Home() {
   const [passO, setPassO] = useState("");
   const [matchNameInput, setMatchNameInput] = useState("");
   const [showSetup, setShowSetup] = useState(true);
+  const [mode, setMode] = useState<"none" | "local" | "online">("none");
   const audio = useAudio();
   const aiTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
@@ -410,6 +411,7 @@ export default function Home() {
 
   const connectRemote = (code: string, role: RemoteRole) => {
     setShowSetup(false);
+    setMode("online");
     if (!supabase) {
       setMessage("Supabase Realtime not configured. Add env vars.");
       return;
@@ -623,6 +625,8 @@ export default function Home() {
     fresh.names = names;
     setGame(fresh);
     setMessage(null);
+    setMode("none");
+    setShowSetup(true);
   };
 
   const updateName = (player: "X" | "O", value: string) => {
@@ -648,6 +652,48 @@ export default function Home() {
 
   return (
     <main className="min-h-screen px-4 py-8">
+      {mode === "none" && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-40 p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+            <h2 className="text-xl font-bold text-slate-100">Choose a mode</h2>
+            <p className="text-sm text-slate-400">
+              Play locally on this device or join an online match via code.
+            </p>
+            <div className="grid grid-cols-1 gap-3">
+              <button
+                className="rounded-xl border border-emerald-400/40 bg-emerald-500/10 text-emerald-100 px-4 py-3 text-left hover:bg-emerald-500/20"
+                onClick={() => {
+                  setMode("local");
+                  setShowSetup(true);
+                  setRemote((prev) => ({
+                    ...prev,
+                    code: "",
+                    status: "idle",
+                    spectator: false
+                  }));
+                }}
+              >
+                <div className="font-semibold">New Local Game</div>
+                <div className="text-xs text-emerald-200/80">
+                  Hotseat or bots. Leaving destroys the local match.
+                </div>
+              </button>
+              <button
+                className="rounded-xl border border-indigo-400/40 bg-indigo-500/10 text-indigo-100 px-4 py-3 text-left hover:bg-indigo-500/20"
+                onClick={() => {
+                  setMode("online");
+                  setShowSetup(true);
+                }}
+              >
+                <div className="font-semibold">Join Online</div>
+                <div className="text-xs text-indigo-200/80">
+                  Host or join with a code. Leave/rejoin anytime.
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="max-w-6xl mx-auto flex flex-col gap-6 lg:flex-row">
         <section className="glass rounded-2xl p-6 grow border border-slate-800/60">
           <header className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -738,36 +784,45 @@ export default function Home() {
             {showSetup && (
               <aside className="bg-slate-900/30 rounded-2xl border border-slate-800/60 p-4 flex flex-col gap-4">
                 <h2 className="font-semibold text-lg">Match Setup</h2>
-                <PlayerCard
-                  player="X"
-                  name={game.names.X}
-                  botLevel={game.bots.X}
-                  onNameChange={updateName}
-                  onBotChange={updateBot}
-                />
-                <PlayerCard
-                  player="O"
-                  name={game.names.O}
-                  botLevel={game.bots.O}
-                  onNameChange={updateName}
-                  onBotChange={updateBot}
-                />
-                <RemoteCard
-                  remote={remote}
-                  codeInput={remoteCodeInput}
-                  matchNameInput={matchNameInput}
-                  passX={passX}
-                  passO={passO}
-                  onCodeChange={setRemoteCodeInput}
-                  onMatchNameChange={setMatchNameInput}
-                  onPassXChange={setPassX}
-                  onPassOChange={setPassO}
-                  onConnect={connectRemote}
-                  onDisconnect={disconnectRemote}
-                  onRoleChange={updateRemoteRole}
-                  realtimeAvailable={realtimeAvailable}
-                  lobbies={lobbyCodes}
-                />
+                {mode === "local" && (
+                  <>
+                    <PlayerCard
+                      player="X"
+                      name={game.names.X}
+                      botLevel={game.bots.X}
+                      onNameChange={updateName}
+                      onBotChange={updateBot}
+                    />
+                    <PlayerCard
+                      player="O"
+                      name={game.names.O}
+                      botLevel={game.bots.O}
+                      onNameChange={updateName}
+                      onBotChange={updateBot}
+                    />
+                    <p className="text-xs text-slate-500">
+                      Leaving will destroy this local game.
+                    </p>
+                  </>
+                )}
+                {mode === "online" && (
+                  <RemoteCard
+                    remote={remote}
+                    codeInput={remoteCodeInput}
+                    matchNameInput={matchNameInput}
+                    passX={passX}
+                    passO={passO}
+                    onCodeChange={setRemoteCodeInput}
+                    onMatchNameChange={setMatchNameInput}
+                    onPassXChange={setPassX}
+                    onPassOChange={setPassO}
+                    onConnect={connectRemote}
+                    onDisconnect={disconnectRemote}
+                    onRoleChange={updateRemoteRole}
+                    realtimeAvailable={realtimeAvailable}
+                    lobbies={lobbyCodes}
+                  />
+                )}
                 <div className="text-sm text-slate-400 space-y-2">
                   <p>
                     Last move decides the next micro-board. If that board is
