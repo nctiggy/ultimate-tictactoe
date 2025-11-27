@@ -324,8 +324,16 @@ export default function Home() {
         : entry;
       map.set(entry.code, merged);
     });
-    setLobbyEntries(Array.from(map.values()).sort((a, b) => b.updated - a.updated));
-  }, [persistedEntries, presenceEntries]);
+    const adjusted = Array.from(map.values()).map((entry) => {
+      if (entry.code !== remote.code) return entry;
+      return {
+        ...entry,
+        hasX: entry.hasX || remote.role === "X" || Boolean(remote.passcodes.X),
+        hasO: entry.hasO || remote.role === "O" || Boolean(remote.passcodes.O)
+      };
+    });
+    setLobbyEntries(adjusted.sort((a, b) => b.updated - a.updated));
+  }, [persistedEntries, presenceEntries, remote.code, remote.role, remote.passcodes]);
 
   useEffect(() => {
     const lobby = lobbyChannelRef.current;
